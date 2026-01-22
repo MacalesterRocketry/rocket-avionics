@@ -316,6 +316,21 @@ void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
     lastPrint = now;
   }
 }
+const Vec3 getGyroCorrected() {
+  return state.gyroCorrected;
+}
+
+const Vec3 getAccelCorrected() {
+  return state.accelCorrected;
+}
+
+const Vec3 getMagCorrected() {
+  return state.magCorrected;
+}
+
+const Vec3 getEarthAccel() {
+  return state.earthAccel;
+}
 
 void initAHRS() {
   state.lastUpdate = micros64();

@@ -12,4 +12,9 @@ void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw);
 void initAHRS();
 Quat getCurrentOrientation();
 
+//Getting
+const Vec3 getGyroCorrected();
+const Vec3 getAccelCorrected();
+const Vec3 getMagCorrected();
+
 #endif //ROCKET_AVIONICS_AHRS_H
