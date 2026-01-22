@@ -192,6 +192,28 @@ struct AHRSState {
 };
 static AHRSState state;
 
+const Vec3 calc_gyro_corrected(const Vec3& gyroRaw) {
+  return Vec3{
+    gyroRaw.x - state.gyroBias.x,
+    gyroRaw.y - state.gyroBias.y,
+    gyroRaw.z - state.gyroBias.z
+  };
+}
+const Vec3 calc_accel_corrected(const Vec3& accelRaw) {
+  return Vec3{
+    accelRaw.x - state.accelBias.x,
+    accelRaw.y - state.accelBias.y,
+    accelRaw.z - state.accelBias.z
+  };
+}
+const Vec3 calc_mag_corrected(const Vec3& magRaw) {
+  return Vec3{
+    magRaw.x - state.magBias.x,
+    magRaw.y - state.magBias.y,
+    magRaw.z - state.magBias.z
+  };
+}
+
 void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
   // Used to Calculate delta time
   const uint64_t now = micros64();
@@ -249,23 +271,9 @@ void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
   const Quat q0 = state.q;
 
   // Step 1: Bias correction and sensor adjustment
-  const Vec3 gyroCorrected = {
-    gyroRaw.x - state.gyroBias.x,
-    gyroRaw.y - state.gyroBias.y,
-    gyroRaw.z - state.gyroBias.z
-  };
-
-  const Vec3 accelCorrected = {
-    accelRaw.x - state.accelBias.x,
-    accelRaw.y - state.accelBias.y,
-    accelRaw.z - state.accelBias.z
-  };
-
-  const Vec3 magCorrected = {
-    magRaw.x - state.magBias.x,
-    magRaw.y - state.magBias.y,
-    magRaw.z - state.magBias.z
-  };
+  const Vec3 gyroCorrected = calc_gyro_corrected(gyroRaw);
+  const Vec3 accelCorrected = calc_accel_corrected(accelRaw);
+  const Vec3 magCorrected = calc_mag_corrected(magRaw);
 
   // Step 2: Gyro propagation (q1) - integrate angular rates
   const Quat delta_q = deltaQuatFromGyro(gyroCorrected, dt);
@@ -316,21 +324,7 @@ void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
     lastPrint = now;
   }
 }
-const Vec3 getGyroCorrected() {
-  return state.gyroCorrected;
-}
 
-const Vec3 getAccelCorrected() {
-  return state.accelCorrected;
-}
-
-const Vec3 getMagCorrected() {
-  return state.magCorrected;
-}
-
-const Vec3 getEarthAccel() {
-  return state.earthAccel;
-}
 
 void initAHRS() {
   state.lastUpdate = micros64();
