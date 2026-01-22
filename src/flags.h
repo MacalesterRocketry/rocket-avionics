@@ -18,6 +18,14 @@
 #define NEOPIXEL_PIN 4
 #define EJECT_BUTTON 24
 
+#define ADXL_INT1_PIN 5
+#define ADXL_INT2_PIN 6
+#define LSM_INT1_PIN 9
+#define LSM_INT2_PIN 10
+#define LIS3_INT1_PIN 11
+#define LIS3_INT2_PIN 12
+#define BMP_INT_PIN 13
+
 #define SERVO_XPLUS_PIN 25
 #define SERVO_XMINUS_PIN 14
 #define SERVO_YPLUS_PIN 15
