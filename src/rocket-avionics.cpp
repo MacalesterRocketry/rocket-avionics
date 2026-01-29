@@ -5,6 +5,7 @@
 #if SERVO_TESTING
 #include <Servo.h>
 
+#include "millis64.h"
 #include "utils.h"
 
 Servo servoXPlus;
@@ -19,32 +20,52 @@ void setup() {
   servoYMinus.attach(SERVO_YMINUS_PIN);
 }
 
-void sweep_servo(Servo &servo, const int32_t DEG_INCREMENT, const uint16_t DELAY_MS) {
-  int32_t pos = 0;
-  while (pos >= 0 && pos <= 180) { // 180 is the max value, regardless of physical servo limits
-    servo.write(pos);
-    delay(DELAY_MS);
-    pos += DEG_INCREMENT;
+int32_t calc_servo_micros_position(const double_t progress) { // progress: 0.0 to 1.0
+  return SERVO_MICROS_MIN + static_cast<int32_t>((SERVO_MICROS_MAX - SERVO_MICROS_MIN) * progress);
+}
+
+void sweep_servo(Servo &servo, const double_t duration_seconds, const bool backwards=false) {
+  const uint64_t duration_us = static_cast<uint64_t>(duration_seconds * 1e6);
+  const uint64_t startTime = micros64();
+
+  while (true) {
+    const uint64_t elapsed = micros64() - startTime;
+
+    // Calculate the progress ratio (0.0 to 1.0), where 1.0 means the sweep is complete
+    const double progress = static_cast<double>(elapsed) / duration_us;
+
+    if (progress >= 1.0) {
+      if (backwards)
+         servo.writeMicroseconds(SERVO_MICROS_MIN);
+      else
+        servo.writeMicroseconds(SERVO_MICROS_MAX);
+      break;
+    }
+
+    const int32_t current_pos = backwards ?
+      calc_servo_micros_position(1.0 - progress) :
+      calc_servo_micros_position(progress);
+
+    servo.writeMicroseconds(current_pos);
   }
 }
 
-void test_servo(Servo& servo, const int32_t DEG_INCREMENT, const uint16_t DELAY_MS) {
-  sweep_servo(servo, DEG_INCREMENT, DELAY_MS);
-  sweep_servo(servo, -DEG_INCREMENT, DELAY_MS);
+void test_servo(Servo& servo) {
+  constexpr double_t duration = 2.0; // seconds
+  sweep_servo(servo, duration, false);
+  sweep_servo(servo, duration, true);
   servo.write(90); // return to center
 }
 
 void loop() {
-  constexpr int16_t DEG_INCREMENT = 1;
-  constexpr uint16_t DELAY_MS = 15;
   // Sweep X+ servo
-  test_servo(servoXPlus, DEG_INCREMENT, DELAY_MS);
+  test_servo(servoXPlus);
   // Sweep X- servo
-  test_servo(servoXMinus, DEG_INCREMENT, DELAY_MS);
+  test_servo(servoXMinus);
   // Sweep Y+ servo
-  test_servo(servoYPlus, DEG_INCREMENT, DELAY_MS);
+  test_servo(servoYPlus);
   // Sweep Y- servo
-  test_servo(servoYMinus, DEG_INCREMENT, DELAY_MS);
+  test_servo(servoYMinus);
 }
 
 #else // !SERVO_TESTING
