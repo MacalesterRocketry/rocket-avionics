@@ -8,7 +8,7 @@
 struct Vec3;
 struct Quat;
 
-static double clamp(double num, double low, double high);
+double clamp(double num, double low, double high);
 
 // 3D Vector
 typedef struct Vec3 {
@@ -205,6 +205,18 @@ enum SystemState : uint8_t {
   STATE_WARNING,
   STATE_FILE_CLOSED,
   STATE_IRRELEVANT = 255
+};
+
+enum Error : uint16_t { // using a bitmask so we can store multiple co-occurrent errors
+  WARNING_SDCARD_CLOSED = 1 << 0,
+  WARNING_NO_LSM = 1 << 1,
+  WARNING_NO_ADXL = 1 << 2,
+  WARNING_NO_LIS3 = 1 << 3,
+  WARNING_NO_BMP = 1 << 4,
+  ERROR_SDCARD_INIT = 1 << 5,
+
+  WARNING_OTHER = 1 << 14,
+  ERROR_OTHER = 1 << 15
 };
 
 #endif

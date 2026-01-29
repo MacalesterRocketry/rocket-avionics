@@ -8,7 +8,6 @@ SdFile dataFile;
 SdSpiConfig config(SD_CS_PIN, DEDICATED_SPI, SD_SCK_MHZ(50), &SPI1); // 50MHz is fast, good for RP2040
 
 // Buffer control
-constexpr uint32_t SYNC_INTERVAL_MS = 1000; // Sync to SD card every 1 second
 uint32_t lastSyncTime = 0;
 
 void initSDCard() {
@@ -91,12 +90,12 @@ void sdSync() {
 
 void logIMU(const float ax, const float ay, const float az, const float gx, const float gy, const float gz,
             const float temp) {
-  PayloadIMU data = {ax, ay, az, gx, gy, gz, temp};
+  const PayloadIMU data = {ax, ay, az, gx, gy, gz, temp};
   logPacket(PACKET_IMU, &data, sizeof(data));
 }
 
 void logHighG(const float ax, const float ay, const float az) {
-  PayloadHighG data = {ax, ay, az};
+  const PayloadHighG data = {ax, ay, az};
   logPacket(PACKET_HIGHG, &data, sizeof(data));
 }
 
@@ -106,7 +105,7 @@ void logGPS(const uint8_t hours, const uint8_t minutes, const uint8_t seconds, c
             const float altitude,
             const uint8_t satellites, const uint8_t fixquality) {
   const uint8_t deciseconds = milliseconds / 100; // convert to deciseconds for storage
-  PayloadGPS data = {
+  const PayloadGPS data = {
     hours,
     minutes,
     seconds,
@@ -123,17 +122,17 @@ void logGPS(const uint8_t hours, const uint8_t minutes, const uint8_t seconds, c
 }
 
 void logMagnetometer(const float mx, const float my, const float mz) {
-  PayloadMagnetometer data = {mx, my, mz};
+  const PayloadMagnetometer data = {mx, my, mz};
   logPacket(PACKET_MAG, &data, sizeof(data));
 }
 
 void logBarometer(const float pressure, const float altitude, const float temperature) {
-  PayloadBarometer data = {pressure, altitude, temperature};
+  const PayloadBarometer data = {pressure, altitude, temperature};
   logPacket(PACKET_BARO, &data, sizeof(data));
 }
 
 void logEvent(const SystemState oldState, const SystemState newState, const EventType reason) {
-  PayloadEvent data = {oldState, newState, reason};
+  const PayloadEvent data = {oldState, newState, reason};
   logPacket(PACKET_EVENT, &data, sizeof(data));
 
   // TODO: Maybe not? AHRS needs all the performance it can get right at ignition. Maybe put it on another core?
@@ -141,6 +140,6 @@ void logEvent(const SystemState oldState, const SystemState newState, const Even
 }
 
 void logStatus(const uint8_t currentState, const float batteryVoltage, const uint8_t sensorsDetected) {
-  PayloadStatus data = {currentState, batteryVoltage, sensorsDetected};
+  const PayloadStatus data = {currentState, batteryVoltage, sensorsDetected};
   logPacket(PACKET_STATUS, &data, sizeof(data));
 }
