@@ -24,6 +24,7 @@ void logMagnetometer(float mx, float my, float mz);
 void logBarometer(float pressure, float altitude, float temperature);
 void logEvent(SystemState oldState, SystemState newState, EventType reason);
 void logStatus(uint8_t currentState, float batteryVoltage, uint8_t sensorsDetected);
+void logQuaternion(const Quat orientation);
 
 #pragma pack(push, 1)
 struct FileHeader {
@@ -87,6 +88,14 @@ struct PayloadStatus {
   float batteryVoltage; // Volts
   uint8_t sensorsDetected; // Bitfield of detected sensors
 };
+
+struct PayloadQuaternion {
+  double w;
+  double x;
+  double y;
+  double z;
+};
+
 #pragma pack(pop)
 
 #endif

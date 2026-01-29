@@ -30,6 +30,7 @@ class PacketType(Enum):
                     # length: 3 bytes, all uint8_t (oldState, newState, reasonCode)
     STATUS  = 0x40  # Battery, etc.
                     # length: 6 bytes: uint8_t rocketState, float batteryVoltage, uint8_t sensorsDetected
+    QUATERNION = 0x50
 
 data_list = []
 

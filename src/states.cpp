@@ -116,8 +116,10 @@ void handleState() { // operations and transition functions
       const SensorReadings sensorData = getSensorData();
       updateAHRS(sensorData.lsm.gyro, sensorData.adxl.highg_accel, sensorData.lis3.mag);
       Quat orientation = getCurrentOrientation();
+      logQuaternion(orientation);
       // TODO: Use orientation for PID stuff
       // TODO: Log orientation to SD card
+      
 
       // TODO: Transition function should probably be some threshold for chute deploy
       // bar+gyro+acc all crazy within 0.1s of each other?

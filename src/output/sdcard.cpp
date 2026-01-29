@@ -144,3 +144,8 @@ void logStatus(const uint8_t currentState, const float batteryVoltage, const uin
   PayloadStatus data = {currentState, batteryVoltage, sensorsDetected};
   logPacket(PACKET_STATUS, &data, sizeof(data));
 }
+
+void logQuaternion(const Quat orientation){
+  PayloadQuaternion data = {orientation.w, orientation.x, orientation.y, orientation.z};
+  logPacket(PACKET_QUATERNION, &data, sizeof(data));
+};
