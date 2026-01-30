@@ -145,7 +145,12 @@ void logStatus(const uint8_t currentState, const float batteryVoltage, const uin
   logPacket(PACKET_STATUS, &data, sizeof(data));
 }
 
-void logQuaternion(const Quat orientation){
-  PayloadQuaternion data = {orientation.w, orientation.x, orientation.y, orientation.z};
+void logQuaternion(const Quat& orientation) {
+  const PayloadQuaternion data = {
+    static_cast<float>(orientation.w),
+    static_cast<float>(orientation.x),
+    static_cast<float>(orientation.y),
+    static_cast<float>(orientation.z)
+  };
   logPacket(PACKET_QUATERNION, &data, sizeof(data));
-};
+}

@@ -30,7 +30,8 @@ class PacketType(Enum):
                     # length: 3 bytes, all uint8_t (oldState, newState, reasonCode)
     STATUS  = 0x40  # Battery, etc.
                     # length: 6 bytes: uint8_t rocketState, float batteryVoltage, uint8_t sensorsDetected
-    QUATERNION = 0x50
+    QUAT = 0x50     # Orientation Quaternion
+                    # length: 16 bytes: 4 floats (qW, qX, qY, qZ)
 
 data_list = []
 
@@ -114,6 +115,12 @@ with open(f"/run/media/bensimmons/8214-BC9F/{logFile}", 'rb') as f:
             data = struct.unpack(endianPrefix + 'BfB', f.read(6))
             row.update({
                 'rocketState': data[0], 'batteryVoltage': data[1], 'sensorsDetected': data[2]
+            })
+
+        elif pkt_type == PacketType.QUAT.value:
+            data = struct.unpack(endianPrefix + 'ffff', f.read(16))
+            row.update({
+                'qW': data[0], 'qX': data[1], 'qY': data[2], 'qZ': data[3]
             })
 
         else:
