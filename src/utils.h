@@ -140,7 +140,7 @@ typedef struct Quat : Vec4Base<double, Quat> {
 
   [[nodiscard]] Quat conjugate() const;
 
-  void normalise();
+  [[nodiscard]] Quat normalized() const;
 
   [[nodiscard]] std::array<std::array<double,3>,3> toMatrix() const;
   Quat() = default;

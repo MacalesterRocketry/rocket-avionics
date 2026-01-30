@@ -25,10 +25,10 @@
   return {w,-x,-y,-z};
 }
 
-void Quat::normalise() {
+Quat Quat::normalized() const {
   const double n = norm();
-  if(n <= 1e-15) { w = 1; x = y = z = 0; return; }
-  w /= n; x /= n; y /= n; z /= n;
+  if(n <= 1e-15) { return {1,0,0,0}; }
+  return {w/n, x/n, y/n, z/n};
 }
 
 // convert quaternion using rotation matrix (body -> earth if q maps body->earth)

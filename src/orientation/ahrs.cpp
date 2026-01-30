@@ -192,21 +192,21 @@ struct AHRSState {
 };
 static AHRSState state;
 
-const Vec3 calc_gyro_corrected(const Vec3& gyroRaw) {
+Vec3 calc_gyro_corrected(const Vec3& gyroRaw) {
   return Vec3{
     gyroRaw.x - state.gyroBias.x,
     gyroRaw.y - state.gyroBias.y,
     gyroRaw.z - state.gyroBias.z
   };
 }
-const Vec3 calc_accel_corrected(const Vec3& accelRaw) {
+Vec3 calc_accel_corrected(const Vec3& accelRaw) {
   return Vec3{
     accelRaw.x - state.accelBias.x,
     accelRaw.y - state.accelBias.y,
     accelRaw.z - state.accelBias.z
   };
 }
-const Vec3 calc_mag_corrected(const Vec3& magRaw) {
+Vec3 calc_mag_corrected(const Vec3& magRaw) {
   return Vec3{
     magRaw.x - state.magBias.x,
     magRaw.y - state.magBias.y,
@@ -214,16 +214,9 @@ const Vec3 calc_mag_corrected(const Vec3& magRaw) {
   };
 }
 
-void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
-  // Used to Calculate delta time
+// TODO: Improve, add to states.cpp
+bool calibrate_ahrs(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
   const uint64_t now = micros64();
-  double dt = (now - state.lastUpdate) / 1000000.0;
-  state.lastUpdate = now;
-
-  if (dt <= 0 || dt > 0.1) {
-    dt = 0.01;
-  }
-
   // Auto-calibration phase (first 3 seconds or longer if needed)
   if (!state.isCalibrated) {
     if (state.calibrationStart == 0) {
@@ -243,7 +236,7 @@ void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
         Serial.printf("Calibrating... %.0f%%\n", progress);
         lastCalibPrint = now;
       }
-      return;
+      return true;
     } else {
       // Calibration complete from the steps above - now compute biases
       state.gyroBias = computeBiasMean(state.gyroSamples);
@@ -265,6 +258,20 @@ void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
                     state.accelBias.x, state.accelBias.y, state.accelBias.z);
     }
   }
+  return false;
+}
+
+void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
+  // Used to Calculate delta time
+  const uint64_t now = micros64();
+  double dt = (now - state.lastUpdate) / 1000000.0;
+  state.lastUpdate = now;
+
+  if (dt <= 0 || dt > 0.1) {
+    dt = 0.01;
+  }
+
+  if (calibrate_ahrs(gyroRaw, accelRaw, magRaw)) return;
 
   //  COMPLETE Q0 → Q4
   // Step 0: Initial quaternion (q0) - previous orientation
@@ -281,14 +288,14 @@ void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
 
   // Step 3: Normalise (q2) - maintain quaternion unit length
   Quat q2 = q1;
-  q2.normalise();
+  q2 = q2.normalized();
 
   // Step 4: Madgwick sensor fusion correction (q3) - fuse with accelerometer and magnetometer
   const Quat q3 = madgwickCorrectionStep(q2, accelCorrected, magCorrected, gyroCorrected, state.beta, dt);
 
   // Step 5: Final normalisation (q4) - ensure valid quaternion
   Quat q4 = q3;
-  q4.normalise();
+  q4 = q4.normalized();
 
   // Update state with final quaternion, final state
   state.q = q4;

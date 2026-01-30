@@ -10,6 +10,6 @@
 #define Ki 1 // integral constant
 #define Kd 2 // derivative constant
 
-double calculate_servo_angle(double airspeed, double current_rocket_angle, double target_rocket_angle);
+// double calculate_servo_angle(double airspeed, double current_rocket_angle, double target_rocket_angle);
 
 #endif
