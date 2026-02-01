@@ -154,3 +154,9 @@ void logQuaternion(const Quat& orientation) {
   };
   logPacket(PACKET_QUATERNION, &data, sizeof(data));
 }
+
+void logDatetime(const uint16_t year, const uint8_t month, const uint8_t day,
+                 const uint8_t hours, const uint8_t minutes, const uint8_t seconds) {
+  const PayloadDatetime data = {year, month, day, hours, minutes, seconds};
+  logPacket(PACKET_DATETIME, &data, sizeof(data));
+}

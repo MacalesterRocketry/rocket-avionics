@@ -26,6 +26,9 @@ class PacketType(Enum):
                     #     float altitude;  // meters
                     #     uint8_t satellites;
                     #     uint8_t fixquality; // 0 = Invalid, 1 = GPS, 2 = DGPS
+    DATETIME = 0x21  # DateTime (from GPS)
+                    # length: 7 bytes: uint16_t year, uint8_t month, uint8_t day, uint8_t hours, uint8_t minutes, uint8_t seconds
+                    # Should only appear once, at beginning of log
     EVENT   = 0x30  # Discrete Events (Launch, Apogee)
                     # length: 3 bytes, all uint8_t (oldState, newState, reasonCode)
     STATUS  = 0x40  # Battery, etc.
@@ -103,6 +106,13 @@ with open(f"/run/media/bensimmons/8214-BC9F/{logFile}", 'rb') as f:
                 'latitude': data[4] / 10_000_000, 'longitude': data[5] / 10_000_000,
                 'speed': data[6], 'angle': data[7], 'gps_altitude': data[8],
                 'satellites': data[9], 'fixquality': data[10]
+            })
+
+        elif pkt_type == PacketType.DATETIME.value:
+            data = struct.unpack(endianPrefix + 'HBBBBB', f.read(7))
+            row.update({
+                'year': data[0], 'month': data[1], 'day': data[2],
+                'dt_hours': data[3], 'dt_minutes': data[4], 'dt_seconds': data[5]
             })
 
         elif pkt_type == PacketType.EVENT.value:
