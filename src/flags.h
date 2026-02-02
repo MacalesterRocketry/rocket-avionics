@@ -3,8 +3,11 @@
 #define DEBUG 0
 #define DEBUG_PRINT_SENSORS 0
 
-#define USE_GPS 1
 #define PID_TUNING 0
+#define SYNC_INTERVAL_MS 5000
+#define SERVO_TESTING 0
+
+#define USE_GPS 1
 
 // Calibration
 #define MAG_BIAS_X (-35.63)
@@ -25,6 +28,9 @@
 
 // Thresholds
 #define LAUNCH_ACCEL_THRESHOLD_G 4.0
+#define SERVO_DEGREE_RANGE 100.0 // degrees of the physical servo. For example, our smaller servo does 100°, and our larger one does 180°.
+#define SERVO_MICROS_MIN 1000 // microseconds
+#define SERVO_MICROS_MAX 2000 // microseconds
 
 // Pin definitions
 #define HARDWARE_VERSION 2
