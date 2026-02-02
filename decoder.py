@@ -26,10 +26,15 @@ class PacketType(Enum):
                     #     float altitude;  // meters
                     #     uint8_t satellites;
                     #     uint8_t fixquality; // 0 = Invalid, 1 = GPS, 2 = DGPS
+    DATETIME = 0x21 # DateTime (from GPS)
+                    # length: 7 bytes: uint16_t year, uint8_t month, uint8_t day, uint8_t hours, uint8_t minutes, uint8_t seconds
+                    # Should only appear once, at beginning of log
     EVENT   = 0x30  # Discrete Events (Launch, Apogee)
                     # length: 3 bytes, all uint8_t (oldState, newState, reasonCode)
     STATUS  = 0x40  # Battery, etc.
                     # length: 6 bytes: uint8_t rocketState, float batteryVoltage, uint8_t sensorsDetected
+    QUAT = 0x50     # Orientation Quaternion
+                    # length: 16 bytes: 4 floats (qW, qX, qY, qZ)
 
 data_list = []
 
@@ -103,6 +108,13 @@ with open(f"/run/media/bensimmons/8214-BC9F/{logFile}", 'rb') as f:
                 'satellites': data[9], 'fixquality': data[10]
             })
 
+        elif pkt_type == PacketType.DATETIME.value:
+            data = struct.unpack(endianPrefix + 'HBBBBB', f.read(7))
+            row.update({
+                'year': data[0], 'month': data[1], 'day': data[2],
+                'dt_hours': data[3], 'dt_minutes': data[4], 'dt_seconds': data[5]
+            })
+
         elif pkt_type == PacketType.EVENT.value:
             data = struct.unpack(endianPrefix + 'BBB', f.read(3))
             row.update({
@@ -113,6 +125,12 @@ with open(f"/run/media/bensimmons/8214-BC9F/{logFile}", 'rb') as f:
             data = struct.unpack(endianPrefix + 'BfB', f.read(6))
             row.update({
                 'rocketState': data[0], 'batteryVoltage': data[1], 'sensorsDetected': data[2]
+            })
+
+        elif pkt_type == PacketType.QUAT.value:
+            data = struct.unpack(endianPrefix + 'ffff', f.read(16))
+            row.update({
+                'qW': data[0], 'qX': data[1], 'qY': data[2], 'qZ': data[3]
             })
 
         else:

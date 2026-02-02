@@ -116,6 +116,7 @@ void handleState() { // operations and transition functions
       const SensorReadings sensorData = getSensorData();
       update_ahrs(sensorData.lsm.gyro, sensorData.adxl.highg_accel, sensorData.lis3.mag);
       Quat orientation = get_current_orientation();
+      logQuaternion(orientation);
       // TODO: Use orientation for PID stuff
       // TODO: Log orientation to SD card
 

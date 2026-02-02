@@ -144,3 +144,19 @@ void logStatus(const uint8_t currentState, const float batteryVoltage, const uin
   PayloadStatus data = {currentState, batteryVoltage, sensorsDetected};
   logPacket(PACKET_STATUS, &data, sizeof(data));
 }
+
+void logQuaternion(const Quat& orientation) {
+  const PayloadQuaternion data = {
+    static_cast<float>(orientation.w),
+    static_cast<float>(orientation.x),
+    static_cast<float>(orientation.y),
+    static_cast<float>(orientation.z)
+  };
+  logPacket(PACKET_QUATERNION, &data, sizeof(data));
+}
+
+void logDatetime(const uint16_t year, const uint8_t month, const uint8_t day,
+                 const uint8_t hours, const uint8_t minutes, const uint8_t seconds) {
+  const PayloadDatetime data = {year, month, day, hours, minutes, seconds};
+  logPacket(PACKET_DATETIME, &data, sizeof(data));
+}

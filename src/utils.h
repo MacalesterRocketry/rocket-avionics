@@ -185,8 +185,10 @@ enum PacketType : uint8_t {
   PACKET_MAG      = 0x12, // Magnetometer
   PACKET_BARO     = 0x13, // Barometer (pressure, altitude, temperature)
   PACKET_GPS      = 0x20, // GPS (includes time, position, etc.)
+  PACKET_DATETIME = 0x21, // Date and Time from GPS
   PACKET_EVENT    = 0x30, // Discrete Events (Launch, Apogee)
-  PACKET_STATUS   = 0x40  // Battery, etc.
+  PACKET_STATUS   = 0x40,  // Battery, etc.
+  PACKET_QUATERNION = 0x50 // Quaternion data
 };
 
 enum EventType : uint8_t {

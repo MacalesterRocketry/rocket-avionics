@@ -31,16 +31,16 @@ bool GPS_Timer_Callback(struct repeating_timer *t) {
 }
 
 void initGPS() {
-  #if DEBUG
+#if DEBUG
   Serial.println("Starting GPS initialization...");
-  #endif
+#endif
 
   GPS.begin(9600);
-  #if DEBUG
+#if DEBUG
   Serial.println("Connected to GPS at 9600 baud");
-  #endif
+#endif
   wait(200);
-  
+
   // Enable RMC + GGA - RMC for basic data, GGA for altitude
   GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA); wait(200);
   // Update GPS position at 5Hz (the maximum)
@@ -54,9 +54,11 @@ void initGPS() {
   // read a char from the GPS serial bus every 1ms (1000us) to ensure we don't miss any data
   add_repeating_timer_us(-1000, GPS_Timer_Callback, nullptr, &gps_timer);
 
-  #if DEBUG
+#if DEBUG
   Serial.println("GPS initialization complete");
-  #endif
+#endif
+
+  logDatetime(GPS.year, GPS.month, GPS.day, GPS.hour, GPS.minute, GPS.seconds);
 }
 
 void readGPS() {

@@ -24,6 +24,9 @@ void logMagnetometer(float mx, float my, float mz);
 void logBarometer(float pressure, float altitude, float temperature);
 void logEvent(SystemState oldState, SystemState newState, EventType reason);
 void logStatus(uint8_t currentState, float batteryVoltage, uint8_t sensorsDetected);
+void logQuaternion(const Quat& orientation);
+void logDatetime(uint16_t year, uint8_t month, uint8_t day,
+                 uint8_t hours, uint8_t minutes, uint8_t seconds);
 
 #pragma pack(push, 1)
 struct FileHeader {
@@ -87,6 +90,23 @@ struct PayloadStatus {
   float batteryVoltage; // Volts
   uint8_t sensorsDetected; // Bitfield of detected sensors
 };
+
+struct PayloadQuaternion {
+  float w; // Our code uses doubles, but we don't need that precision for logs
+  float x;
+  float y;
+  float z;
+};
+
+struct PayloadDatetime {
+  uint16_t year;
+  uint8_t month;
+  uint8_t day;
+  uint8_t hours;
+  uint8_t minutes;
+  uint8_t seconds;
+};
+
 #pragma pack(pop)
 
 #endif
