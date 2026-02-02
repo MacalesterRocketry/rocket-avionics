@@ -192,76 +192,7 @@ struct AHRSState {
 };
 static AHRSState state;
 
-Vec3 calc_gyro_corrected(const Vec3& gyroRaw) {
-  return Vec3{
-    gyroRaw.x - state.gyroBias.x,
-    gyroRaw.y - state.gyroBias.y,
-    gyroRaw.z - state.gyroBias.z
-  };
-}
-Vec3 calc_accel_corrected(const Vec3& accelRaw) {
-  return Vec3{
-    accelRaw.x - state.accelBias.x,
-    accelRaw.y - state.accelBias.y,
-    accelRaw.z - state.accelBias.z
-  };
-}
-Vec3 calc_mag_corrected(const Vec3& magRaw) {
-  return Vec3{
-    magRaw.x - state.magBias.x,
-    magRaw.y - state.magBias.y,
-    magRaw.z - state.magBias.z
-  };
-}
-
-// TODO: Improve, add to states.cpp
-bool calibrate_ahrs(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
-  const uint64_t now = micros64();
-  // Auto-calibration phase (first 3 seconds or longer if needed)
-  if (!state.isCalibrated) {
-    if (state.calibrationStart == 0) {
-      state.calibrationStart = now;
-      Serial.println("Auto-calibration started - keep IMU stationary...");
-    }
-    // Collect calibration samples for 3 seconds; we can adjust this duration as needed??
-    if (now - state.calibrationStart < 3000000) {
-      state.gyroSamples.push_back(gyroRaw);
-      state.accelSamples.push_back(accelRaw);
-      state.magSamples.push_back(magRaw);
-
-      // Display calibration progress
-      static unsigned long lastCalibPrint = 0;
-      if (now - lastCalibPrint > 500000) {
-        float progress = (now - state.calibrationStart) / 3000000.0 * 100.0;
-        Serial.printf("Calibrating... %.0f%%\n", progress);
-        lastCalibPrint = now;
-      }
-      return true;
-    } else {
-      // Calibration complete from the steps above - now compute biases
-      state.gyroBias = computeBiasMean(state.gyroSamples);
-      state.accelBias = computeBiasMean(state.accelSamples);
-      state.magBias = computeBiasMean(state.magSamples);
-
-      // Adjustment for rocket launch position (Z-up coordinate system/nose up)
-      state.accelBias.z += 9.81; // TODO: Figure out if this should be y
-
-      state.isCalibrated = true;
-      state.gyroSamples.clear();
-      state.accelSamples.clear();
-      state.magSamples.clear();
-
-      Serial.println("Calibration complete!");
-      Serial.printf("Gyro bias: %.4f, %.4f, %.4f rad/s\n",
-                    state.gyroBias.x, state.gyroBias.y, state.gyroBias.z);
-      Serial.printf("Accel bias: %.4f, %.4f, %.4f m/s²\n",
-                    state.accelBias.x, state.accelBias.y, state.accelBias.z);
-    }
-  }
-  return false;
-}
-
-void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
+void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
   // Used to Calculate delta time
   const uint64_t now = micros64();
   double dt = (now - state.lastUpdate) / 1000000.0;
@@ -271,19 +202,12 @@ void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
     dt = 0.01;
   }
 
-  if (calibrate_ahrs(gyroRaw, accelRaw, magRaw)) return;
-
   //  COMPLETE Q0 → Q4
   // Step 0: Initial quaternion (q0) - previous orientation
   const Quat q0 = state.q;
 
-  // Step 1: Bias correction and sensor adjustment
-  const Vec3 gyroCorrected = calc_gyro_corrected(gyroRaw);
-  const Vec3 accelCorrected = calc_accel_corrected(accelRaw);
-  const Vec3 magCorrected = calc_mag_corrected(magRaw);
-
   // Step 2: Gyro propagation (q1) - integrate angular rates
-  const Quat delta_q = deltaQuatFromGyro(gyroCorrected, dt);
+  const Quat delta_q = deltaQuatFromGyro(gyro, dt);
   const Quat q1 = q0 * delta_q;
 
   // Step 3: Normalise (q2) - maintain quaternion unit length
@@ -291,7 +215,7 @@ void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
   q2 = q2.normalized();
 
   // Step 4: Madgwick sensor fusion correction (q3) - fuse with accelerometer and magnetometer
-  const Quat q3 = madgwickCorrectionStep(q2, accelCorrected, magCorrected, gyroCorrected, state.beta, dt);
+  const Quat q3 = madgwickCorrectionStep(q2, accel, mag, gyro, state.beta, dt);
 
   // Step 5: Final normalisation (q4) - ensure valid quaternion
   Quat q4 = q3;
@@ -302,9 +226,9 @@ void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
 
   // EARTH FRAME CONVERSIONS
   // Convert body-frame measurements to earth frame for control systems
-  const Vec3 earthAccel = rotateBodyToEarth(q4, accelCorrected);
-  const Vec3 earthGyro = rotateBodyToEarth(q4, gyroCorrected);
-  const Vec3 earthMag = rotateBodyToEarth(q4, magCorrected);
+  const Vec3 earthAccel = rotateBodyToEarth(q4, accel);
+  const Vec3 earthGyro = rotateBodyToEarth(q4, gyro);
+  const Vec3 earthMag = rotateBodyToEarth(q4, mag);
 
   // CONTINUOUS ORIENTATION MONITORING/Active Tracking
   static unsigned long lastPrint = 0;
@@ -332,14 +256,10 @@ void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
   }
 }
 
-
-void initAHRS() {
+void start_ahrs() {
   state.lastUpdate = micros64();
-  state.gyroSamples.clear();
-  state.accelSamples.clear();
-  state.magSamples.clear();
 }
 
-Quat getCurrentOrientation() {
+Quat get_current_orientation() {
   return state.q;
 }

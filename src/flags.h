@@ -6,6 +6,23 @@
 #define USE_GPS 1
 #define PID_TUNING 0
 
+// Calibration
+#define MAG_BIAS_X (-35.63)
+#define MAG_BIAS_Y (19.96)
+#define MAG_BIAS_Z (-33.43)
+
+#define HIGHG_BIAS_X (0.0)
+#define HIGHG_BIAS_Y (0.0)
+#define HIGHG_BIAS_Z (0.0)
+
+#define LOWG_BIAS_X (0.0)
+#define LOWG_BIAS_Y (0.0)
+#define LOWG_BIAS_Z (0.0)
+
+#define GYRO_BIAS_X (0.0)
+#define GYRO_BIAS_Y (0.0)
+#define GYRO_BIAS_Z (0.0)
+
 // Thresholds
 #define LAUNCH_ACCEL_THRESHOLD_G 4.0
 

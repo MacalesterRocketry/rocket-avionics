@@ -96,7 +96,7 @@ void handleState() { // operations and transition functions
       // Only true when using interrupts, which we're not right now, but I'm leaving it.
       if (hasLaunched()) {
         logEvent(systemState, STATE_ASCENT, EVENT_LAUNCH_DETECTED);
-        initAHRS();
+        start_ahrs();
 #if DEBUG
         Serial.println("Launch detected!");
 #endif
@@ -114,8 +114,8 @@ void handleState() { // operations and transition functions
     }
     case STATE_ASCENT: {
       const SensorReadings sensorData = getSensorData();
-      updateAHRS(sensorData.lsm.gyro, sensorData.adxl.highg_accel, sensorData.lis3.mag);
-      Quat orientation = getCurrentOrientation();
+      update_ahrs(sensorData.lsm.gyro, sensorData.adxl.highg_accel, sensorData.lis3.mag);
+      Quat orientation = get_current_orientation();
       // TODO: Use orientation for PID stuff
       // TODO: Log orientation to SD card
 
@@ -142,6 +142,8 @@ void handleState() { // operations and transition functions
     case STATE_ERROR: {
       break;
     }
+    case STATE_IRRELEVANT:
+      break;
   }
   pixel.show();
 }
