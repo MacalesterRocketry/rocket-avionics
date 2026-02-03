@@ -1,6 +1,17 @@
 #include <Arduino.h>
 
 #include "flags.h"
+
+#if SERVO_TESTING
+#include "output/servo.h"
+void setup() {
+  init_servos();
+}
+
+void loop() {
+  servo_test_loop();
+}
+#else // !SERVO_TESTING
 #include "states.h"
 #include "utils.h"
 #include "output/sdcard.h"
@@ -36,3 +47,4 @@ void setup() {
 void loop() {
   handleState();
 }
+#endif // SERVO_TESTING

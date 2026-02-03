@@ -3,12 +3,9 @@
 // normalise (q2) -> Madgwick correction (q3) -> normalise (q4 final orientation)
 // Replace the placeholder sensor reads functions with our IMU reads. DOUBLE CHECK I HAVE THE RIGHT ONES!!
 
+#include "ahrs.h"
 #include <Arduino.h>
-#include <Adafruit_LSM6DS.h>
-#include <Adafruit_LIS3MDL.h>
-#include <Adafruit_Sensor.h>
 
-#include <array>
 #include <vector>
 #include <cmath>
 
