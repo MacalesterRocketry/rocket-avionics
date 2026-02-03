@@ -44,9 +44,13 @@ void init_servos() {
   servoYMinus.attach(SERVO_YMINUS_PIN);
 }
 
-void set_servo_angle(Servo& servo, const double_t angle_degrees) {
-  const double_t clamped_angle = clamp(angle_degrees, 0.0, SERVO_DEGREE_RANGE);
-  const double_t progress = clamped_angle / SERVO_DEGREE_RANGE;
+// So 0° is in line with the fin, positive angles rotate it one way, and negative angles rotate it the other way.
+// TODO: Figure out which direction it's rotated and how that affects PID.
+void set_servo_angle(Servo& servo, const double_t angle_degrees_from_neutral) {
+  constexpr double max_deflection = SERVO_DEGREE_RANGE / 2.0;
+  constexpr double neutral_angle = max_deflection; // can calibrate if need be
+  const double_t clamped_angle = clamp(angle_degrees_from_neutral, -max_deflection, max_deflection);
+  const double_t progress = (clamped_angle + neutral_angle) / SERVO_DEGREE_RANGE; // 0.0 to 1.0
   const int32_t micros_position = calc_servo_micros_position(progress);
   servo.writeMicroseconds(micros_position);
 }

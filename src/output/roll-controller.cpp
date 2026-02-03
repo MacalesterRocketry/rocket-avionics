@@ -1,6 +1,8 @@
 #include "states.h"
 #include "orientation/ahrs.h"
 #include "output/roll-controller.h"
+#include "output/servo.h"
+#include "utils.h"
 
 #include "millis64.h"
 
@@ -39,19 +41,16 @@ void calculate_and_execute_torque(const Vec3 &gyro, const Quat &qtarget, double 
   double attack_angle = calculate_angle_of_attack();
 
   // Look up effectiveness from CFD table
-  double effectiveness = cfd_lookup(mach, attack_angle, "dτ/dδ");
+  const double effectiveness = cfd_lookup(mach, attack_angle, "dτ/dδ"); // TODO: figure out what dτ/dδ is supposed to be
+                                                                        //  Note: δ was prior name for fin_deflection_angle
 
   // Compute fin deflection
-  double δ = torque_desired / effectiveness;
-  δ = clamp(δ, -max_deflection, max_deflection);
-
-  // EXECUTE CONTROL
-  // Convert to servo angle
-  double servo_center = 90;  //  calibrated center, could change based on testing
-  double servo_angle = servo_center + δ;
+  const double fin_deflection_angle = torque_desired / effectiveness;
 
   // Command servos
-  move_servo(ROLL_SERVO_PIN, servo_angle);
+  for (Servo &servo : servos) {
+    set_servo_angle(servo, fin_deflection_angle);
+  }
 
   // DISPLAY CURRENT ROLL
   // Extract roll angle from qcurrent
