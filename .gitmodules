@@ -1,3 +1,6 @@
 [submodule "lib/BMP3XX"]
 	path = lib/BMP3XX
 	url = https://github.com/MacalesterRocketry/BMP3XX.git
+[submodule "lib/millis64"]
+	path = lib/millis64
+	url = https://github.com/MacalesterRocketry/millis64.git
