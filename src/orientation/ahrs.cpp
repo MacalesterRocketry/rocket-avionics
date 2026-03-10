@@ -178,25 +178,22 @@ Vec3 computeBiasMean(const std::vector<Vec3>& samples) {
 // AHRS Current State
 struct AHRSState {
   Quat q = {1.0, 0.0, 0.0, 0.0}; // Current orientation quaternion
-  Vec3 gyroBias = {0.0, 0.0, 0.0};
-  Vec3 accelBias = {0.0, 0.0, 0.0};
-  Vec3 magBias = {0.0, 0.0, 0.0};
   double beta = 0.1; // Madgwick filter gain
   uint64_t lastUpdate = 0;
-  bool isCalibrated = false;
-  uint64_t calibrationStart = 0;
-  std::vector<Vec3> gyroSamples, accelSamples, magSamples;
+  Vec3 acceleration = {0, 0, 0};
+  Vec3 velocity = {0, 0, 0};
+  Vec3 position = {0, 0, 0};
 };
 static AHRSState state;
 
 void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
   // Used to Calculate delta time
-  const uint64_t now = micros64();
-  double dt = (now - state.lastUpdate) / 1000000.0;
-  state.lastUpdate = now;
+  const uint64_t now_micros = micros64();
+  double dt = (now_micros - state.lastUpdate) / 1000000.0;
+  state.lastUpdate = now_micros;
 
-  if (dt <= 0 || dt > 0.1) {
-    dt = 0.01;
+  if (dt <= 0) {
+    return; // Invalid time step, skip update
   }
 
   //  COMPLETE Q0 → Q4
@@ -227,36 +224,74 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
   const Vec3 earthGyro = rotateBodyToEarth(q4, gyro);
   const Vec3 earthMag = rotateBodyToEarth(q4, mag);
 
+  state.acceleration = earthAccel;
+  state.velocity += earthAccel * dt;
+  state.position += state.velocity * dt;
+
   // CONTINUOUS ORIENTATION MONITORING/Active Tracking
+#if DEBUG and DEBUG_PRINT_SENSORS
   static unsigned long lastPrint = 0;
-  if (now - lastPrint > 100000) {
+  if (now_micros - lastPrint > 100000) {
     // Convert quaternion to Euler angles
-    const double roll = atan2(2.0 * (q4.w * q4.x + q4.y * q4.z),
-                              1.0 - 2.0 * (q4.x * q4.x + q4.y * q4.y));
-    const double pitch = asin(2.0 * (q4.w * q4.y - q4.z * q4.x));
-    const double yaw = atan2(2.0 * (q4.w * q4.z + q4.x * q4.y),
-                             1.0 - 2.0 * (q4.y * q4.y + q4.z * q4.z));
+    const double roll = calculate_roll_deg(state.q);
+    const double pitch = calculate_pitch_deg(state.q);
+    const double yaw = calculate_yaw_deg(state.q);
 
     // Display orientation and earth-frame data
     Serial.println("ROCKET ORIENTATION");
     Serial.printf("Quaternion: w=%.3f, x=%.3f, y=%.3f, z=%.3f\n",
-                  q4.w, q4.x, q4.y, q4.z);
+                  state.q.w, state.q.x, state.q.y, state.q.z);
     Serial.printf("Euler: Roll=%.1f°, Pitch=%.1f°, Yaw=%.1f°\n",
-                  roll * 180 / M_PI, pitch * 180 / M_PI, yaw * 180 / M_PI);
+                  roll, pitch, yaw);
     Serial.printf("Earth Accel: X=%.2f, Y=%.2f, Z=%.2f m/s²\n",
                   earthAccel.x, earthAccel.y, earthAccel.z);
     Serial.printf("Earth Gyro: X=%.2f, Y=%.2f, Z=%.2f rad/s\n",
                   earthGyro.x, earthGyro.y, earthGyro.z);
     Serial.println("==========================");
 
-    lastPrint = now;
+    lastPrint = now_micros;
   }
+#endif
 }
-
 void start_ahrs() {
   state.lastUpdate = micros64();
 }
-
-Quat get_current_orientation() {
+Quat get_orientation() {
   return state.q;
+}
+
+Vec3 get_acceleration() {
+  return state.acceleration;
+}
+Vec3 get_velocity() {
+  return state.velocity;
+}
+Vec3 get_position() {
+  return state.position;
+}
+
+Rad calculate_roll_rad(const Quat& q) {
+  return atan2(2.0 * (q.w * q.x + q.y * q.z),
+               1.0 - 2.0 * (q.x * q.x + q.y * q.y));
+}
+
+Rad calculate_pitch_rad(const Quat& q) {
+  return asin(2.0 * (q.w * q.y - q.z * q.x));
+}
+
+Rad calculate_yaw_rad(const Quat& q) {
+  return atan2(2.0 * (q.w * q.z + q.x * q.y),
+               1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+}
+
+Deg calculate_roll_deg(const Quat& q) {
+  return radToDeg(calculate_roll_rad(q));
+}
+
+Deg calculate_pitch_deg(const Quat& q) {
+  return radToDeg(calculate_pitch_rad(q));
+}
+
+Deg calculate_yaw_deg(const Quat& q) {
+  return radToDeg(calculate_yaw_rad(q));
 }

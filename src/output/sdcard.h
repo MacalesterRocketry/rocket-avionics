@@ -30,14 +30,13 @@ void logDatetime(uint16_t year, uint8_t month, uint8_t day,
 
 #pragma pack(push, 1)
 struct FileHeader {
-  uint8_t version = 2;
+  uint8_t version = 3;
   uint8_t endian = 0; // little-endian
 };
 
 struct PacketHeader {
   uint8_t type;
-  uint32_t timestamp_micros;
-  uint32_t timestamp_millis; // micros wraps around after just over an hour, so we're using millis for the actual time and micros for deltas
+  uint64_t timestamp_micros;
 };
 
 // IMU: Accelerometer + Gyroscope + Temperature
@@ -91,11 +90,20 @@ struct PayloadStatus {
   uint8_t sensorsDetected; // Bitfield of detected sensors
 };
 
-struct PayloadQuaternion {
-  float w; // Our code uses doubles, but we don't need that precision for logs
-  float x;
-  float y;
-  float z;
+struct PayloadAHRS {
+  float quat_w; // Our code uses doubles, but we don't need that precision for logs
+  float quat_x;
+  float quat_y;
+  float quat_z;
+  float accel_x;
+  float accel_y;
+  float accel_z;
+  float velocity_x;
+  float velocity_y;
+  float velocity_z;
+  float position_x;
+  float position_y;
+  float position_z;
 };
 
 struct PayloadDatetime {

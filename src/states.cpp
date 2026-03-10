@@ -28,7 +28,7 @@ void wait(const int milliseconds) {
   }
 }
 
-SensorReadings getSensorData() { // TODO: return a struct from this, which can then be used for updateAHRS
+SensorReadings getSensorData() {
 #if USE_GPS
   readGPS();
 #endif
@@ -114,8 +114,12 @@ void handleState() { // operations and transition functions
     }
     case STATE_ASCENT: {
       const SensorReadings sensorData = getSensorData();
-      update_ahrs(sensorData.lsm.gyro, sensorData.adxl.highg_accel, sensorData.lis3.mag);
-      Quat orientation = get_current_orientation();
+      Vec3 accel = sensorData.lsm.accel;
+      if (accel.mag() >= ACCELEROMETER_SWITCH_THRESHOLD) { // If the low-G accelerometer is saturated, switch to high-G readings for AHRS
+        accel = sensorData.adxl.highg_accel;
+      }
+      update_ahrs(sensorData.lsm.gyro, accel, sensorData.lis3.mag);
+      const Quat orientation = get_orientation();
       logQuaternion(orientation);
       // TODO: Use orientation for PID stuff
       // TODO: Log orientation to SD card

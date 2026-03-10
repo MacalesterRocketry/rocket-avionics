@@ -10,6 +10,16 @@
 
 void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag);
 void start_ahrs();
-Quat get_current_orientation();
+Quat get_orientation();
+Vec3 get_acceleration();
+Vec3 get_velocity();
+Vec3 get_position();
+
+Rad calculate_roll_rad(const Quat& q);
+Rad calculate_pitch_rad(const Quat& q);
+Rad calculate_yaw_rad(const Quat& q);
+Deg calculate_roll_deg(const Quat& q);
+Deg calculate_pitch_deg(const Quat& q);
+Deg calculate_yaw_deg(const Quat& q);
 
 #endif //ROCKET_AVIONICS_AHRS_H

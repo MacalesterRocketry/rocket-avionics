@@ -51,3 +51,10 @@ Quat Quat::normalized() const {
 double clamp(const double num, const double low, const double high) {
   return num < low ? low : (num > high ? high : num);
 }
+
+Deg radToDeg(const Rad radians) {
+  return radians * 180.0 / M_PI;
+}
+Rad degToRad(const Deg degrees) {
+  return degrees * M_PI / 180.0;
+}

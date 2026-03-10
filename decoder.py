@@ -33,12 +33,12 @@ class PacketType(Enum):
                     # length: 3 bytes, all uint8_t (oldState, newState, reasonCode)
     STATUS  = 0x40  # Battery, etc.
                     # length: 6 bytes: uint8_t rocketState, float batteryVoltage, uint8_t sensorsDetected
-    QUAT = 0x50     # Orientation Quaternion
-                    # length: 16 bytes: 4 floats (qW, qX, qY, qZ)
+    AHRS = 0x50     # Orientation Quaternion, earth-frame acceleration, velocity, position from AHRS filter
+                    # length: 52 bytes: float qW, qX, qY, qZ, accX_earth, accY_earth, accZ_earth, velX_earth, velY_earth, velZ_earth, posX_earth, posY_earth, posZ_earth
 
 data_list = []
 
-files = os.listdir('/run/media/bensimmons/8214-BC9F/')
+files = os.listdir('/run/media/annasimmons/8214-BC9F/')
 logFile = ""
 highestLogNum = -1
 for file in files:
@@ -49,7 +49,7 @@ for file in files:
             logFile = file
 print(f"Reading log file: {logFile}")
 
-with open(f"/run/media/bensimmons/8214-BC9F/{logFile}", 'rb') as f:
+with open(f"/run/media/annasimmons/8214-BC9F/{logFile}", 'rb') as f:
     endian = "little"
     version = f.read(1)
     endianRaw = f.read(1)
@@ -60,7 +60,7 @@ with open(f"/run/media/bensimmons/8214-BC9F/{logFile}", 'rb') as f:
     else:
         endian = "big"
         endianPrefix = ">"
-    if version != 0x2.to_bytes(1, endian):
+    if version != 0x3.to_bytes(1, endian):
         print("Unsupported version")
         exit(1)
 
@@ -127,10 +127,13 @@ with open(f"/run/media/bensimmons/8214-BC9F/{logFile}", 'rb') as f:
                 'rocketState': data[0], 'batteryVoltage': data[1], 'sensorsDetected': data[2]
             })
 
-        elif pkt_type == PacketType.QUAT.value:
-            data = struct.unpack(endianPrefix + 'ffff', f.read(16))
+        elif pkt_type == PacketType.AHRS.value:
+            data = struct.unpack(endianPrefix + 'ffffffffff', f.read(52))
             row.update({
-                'qW': data[0], 'qX': data[1], 'qY': data[2], 'qZ': data[3]
+                'qW': data[0], 'qX': data[1], 'qY': data[2], 'qZ': data[3],
+                'accX_earth': data[4], 'accY_earth': data[5], 'accZ_earth': data[6],
+                'velX_earth': data[7], 'velY_earth': data[8], 'velZ_earth': data[9],
+                'posX_earth': data[10], 'posY_earth': data[11], 'posZ_earth': data[12]
             })
 
         else:
