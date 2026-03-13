@@ -31,6 +31,11 @@
 #define GYRO_BIAS_Y (0.0)
 #define GYRO_BIAS_Z (0.0)
 
+#define MOMENT_OF_INERTIA 0.01 // MoI in kg m²
+#define ROLL_PID_Kp 0.4 // proportional constant
+#define ROLL_PID_Ki 1 // integral constant
+#define ROLL_PID_Kd 2 // derivative constant
+
 // Thresholds
 #define LAUNCH_ACCEL_THRESHOLD_G 4.0
 #define SERVO_DEGREE_RANGE 100.0 // degrees of the physical servo. For example, our smaller servo does 100°, and our larger one does 180°.

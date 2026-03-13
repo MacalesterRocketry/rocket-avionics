@@ -3,6 +3,7 @@
 #include "Adafruit_NeoPixel.h"
 #include "orientation/ahrs.h"
 #include "orientation/sensors.h"
+#include "output/roll-controller.h"
 
 Adafruit_NeoPixel pixel = Adafruit_NeoPixel(1, NEOPIXEL_PIN);
 
@@ -119,13 +120,14 @@ void handleState() { // operations and transition functions
         accel = sensorData.adxl.highg_accel;
       }
       update_ahrs(sensorData.lsm.gyro, accel, sensorData.lis3.mag);
-      const Quat orientation = get_orientation();
-      logQuaternion(orientation);
-      // TODO: Use orientation for PID stuff
-      // TODO: Log orientation to SD card
+      logAHRS(get_orientation(), get_acceleration(), get_velocity(), get_position());
+
+      // Actuate roll control surfaces based on current orientation and target angle
+      static const Quat base_orientation = get_orientation(); // Set the base orientation at launch
+      update_roll(0, base_orientation); // TODO: Target angle should be based on a flight plan, not just 0
 
       // TODO: Transition function should probably be some threshold for chute deploy
-      // bar+gyro+acc all crazy within 0.1s of each other?
+      //  bar+gyro+acc all crazy within 0.1s of each other?
       // if (fileOpen()) {
       //   getSensorData();
       // } else {

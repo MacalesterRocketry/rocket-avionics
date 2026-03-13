@@ -24,8 +24,8 @@ Vec3 rotateBodyToEarth(const Quat& q, const Vec3& v_b) {
 // small helper: axis-angle -> quaternion exact
 Quat axisAngleToQuat(const Vec3& axis, const double angle) {
   const double half = angle * 0.5;
-  const double s = std::sin(half);
-  return Quat{std::cos(half), axis.x * s, axis.y * s, axis.z * s};
+  const double s = sin(half);
+  return Quat{cos(half), axis.x * s, axis.y * s, axis.z * s};
 }
 
 // build delta quaternion(propagation) from angular rate omega (rad/s) and dt
@@ -183,6 +183,7 @@ struct AHRSState {
   Vec3 acceleration = {0, 0, 0};
   Vec3 velocity = {0, 0, 0};
   Vec3 position = {0, 0, 0};
+  Vec3 angular_velocity = {0, 0, 0};
 };
 static AHRSState state;
 
@@ -228,6 +229,8 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
   state.velocity += earthAccel * dt;
   state.position += state.velocity * dt;
 
+  state.angular_velocity = gyro; // still in body frame, but we can use it for control
+
   // CONTINUOUS ORIENTATION MONITORING/Active Tracking
 #if DEBUG and DEBUG_PRINT_SENSORS
   static unsigned long lastPrint = 0;
@@ -269,6 +272,9 @@ Vec3 get_velocity() {
 Vec3 get_position() {
   return state.position;
 }
+Vec3 get_angular_velocity() {
+  return state.angular_velocity;
+}
 
 Rad calculate_roll_rad(const Quat& q) {
   return atan2(2.0 * (q.w * q.x + q.y * q.z),
@@ -294,4 +300,19 @@ Deg calculate_pitch_deg(const Quat& q) {
 
 Deg calculate_yaw_deg(const Quat& q) {
   return radToDeg(calculate_yaw_rad(q));
+}
+
+Quat roll_deg_to_quat(const Deg roll) {
+  const double roll_rad = degToRad(roll);
+  return axisAngleToQuat({1, 0, 0}, roll_rad);
+}
+
+Quat yaw_deg_to_quat(const Deg yaw) {
+  const double yaw_rad = degToRad(yaw);
+  return axisAngleToQuat({0, 0, 1}, yaw_rad);
+}
+
+Quat pitch_deg_to_quat(const Deg pitch) {
+  const double pitch_rad = degToRad(pitch);
+  return axisAngleToQuat({0, 1, 0}, pitch_rad);
 }

@@ -24,7 +24,7 @@ void logMagnetometer(float mx, float my, float mz);
 void logBarometer(float pressure, float altitude, float temperature);
 void logEvent(SystemState oldState, SystemState newState, EventType reason);
 void logStatus(uint8_t currentState, float batteryVoltage, uint8_t sensorsDetected);
-void logQuaternion(const Quat& orientation);
+void logAHRS(const Quat& orientation, const Vec3& acceleration, const Vec3& velocity, const Vec3& position);
 void logDatetime(uint16_t year, uint8_t month, uint8_t day,
                  uint8_t hours, uint8_t minutes, uint8_t seconds);
 
