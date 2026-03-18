@@ -190,7 +190,7 @@ static AHRSState state;
 void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
   // Used to Calculate delta time
   const uint64_t now_micros = micros64();
-  double dt = (now_micros - state.lastUpdate) / 1000000.0;
+  const double dt = (now_micros - state.lastUpdate) / 1000000.0;
   state.lastUpdate = now_micros;
 
   if (dt <= 0) {
@@ -232,7 +232,7 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
   state.angular_velocity = gyro; // still in body frame, but we can use it for control
 
   // CONTINUOUS ORIENTATION MONITORING/Active Tracking
-#if DEBUG and DEBUG_PRINT_SENSORS
+#if DEBUG and DEBUG_PRINT_ORIENTATION
   static unsigned long lastPrint = 0;
   if (now_micros - lastPrint > 100000) {
     // Convert quaternion to Euler angles
@@ -247,9 +247,11 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
     Serial.printf("Euler: Roll=%.1f°, Pitch=%.1f°, Yaw=%.1f°\n",
                   roll, pitch, yaw);
     Serial.printf("Earth Accel: X=%.2f, Y=%.2f, Z=%.2f m/s²\n",
-                  earthAccel.x, earthAccel.y, earthAccel.z);
-    Serial.printf("Earth Gyro: X=%.2f, Y=%.2f, Z=%.2f rad/s\n",
-                  earthGyro.x, earthGyro.y, earthGyro.z);
+                  state.acceleration.x, state.acceleration.y, state.acceleration.z);
+    Serial.printf("Earth Velocity: X=%.2f, Y=%.2f, Z=%.2f m/s\n",)
+                  state.velocity.x, state.velocity.y, state.velocity.z);
+    Serial.printf("Earth Position: X=%.2f, Y=%.2f, Z=%.2f m\n",)
+                  state.position.x, state.position.y, state.position.z);
     Serial.println("==========================");
 
     lastPrint = now_micros;

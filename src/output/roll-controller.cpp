@@ -9,7 +9,7 @@
 // Effectiveness is the slope of the deflection vs torque curve at zero deflection, which is what we want for the linear approximation. We can adjust it later if we want to get fancy and account for nonlinearity at higher deflections.
 // Using deflection in degrees, so effectiveness is in Nm/deg
 double calculate_effectiveness(const Vec3 &velocity) {
-  return 1; // Placeholder value
+  return 1.0 / 360; // Placeholder value
 }
 
 Deg calculate_deflection_pid(const Quat& qtarget, const double dt) {
@@ -44,12 +44,6 @@ Deg calculate_deflection_pid(const Quat& qtarget, const double dt) {
   // Compute fin deflection using linear approximation
   const double fin_deflection_angle = torque_desired / effectiveness_zero;
 
-#if DEBUG
-  Deg current_roll = calculate_roll_deg(qcurrent);
-  Serial.print("Current Roll: ");
-  Serial.println(current_roll);
-#endif
-
   return fin_deflection_angle;
 }
 
@@ -73,6 +67,15 @@ void update_roll(const Deg target_angle, const Quat& base_orientation) {
     const uint64_t now_micros = micros64();
     const double dt = (now_micros - last_time) / 1000000.0;
     const double fin_deflection_angle = calculate_deflection_pid(qtarget, dt);
+#if DEBUG and DEBUG_PRINT_ROLL_CONTROL
+    Serial.print("Target Roll: ");
+    Serial.print(target_angle);
+    Serial.print("°, Current Roll: ");
+    Serial.print(current_angle);
+    Serial.print("°, Fin Deflection: ");
+    Serial.print(fin_deflection_angle);
+    Serial.println("°");
+#endif
 
     // Command servos
     for (Servo &servo : servos) {

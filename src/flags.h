@@ -2,12 +2,14 @@
 
 #define DEBUG 0
 #define DEBUG_PRINT_SENSORS 0
+#define DEBUG_PRINT_ORIENTATION 1
+#define DEBUG_PRINT_ROLL_CONTROL 1
 
 #define PID_TUNING 0
 #define SYNC_INTERVAL_MS 5000
 #define SERVO_TESTING 0
 
-#define USE_GPS 1
+#define USE_GPS 0
 
 // Calibration
 #define G 9.80579 // North Branch gravity in m/s²
@@ -31,7 +33,7 @@
 #define GYRO_BIAS_Y (0.0)
 #define GYRO_BIAS_Z (0.0)
 
-#define MOMENT_OF_INERTIA 0.01 // MoI in kg m²
+#define MOMENT_OF_INERTIA 0.00685 // MoI in kg m²
 #define ROLL_PID_Kp 0.4 // proportional constant
 #define ROLL_PID_Ki 1 // integral constant
 #define ROLL_PID_Kd 2 // derivative constant

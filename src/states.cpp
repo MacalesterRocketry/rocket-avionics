@@ -91,6 +91,9 @@ void handleState() { // operations and transition functions
   }
 
   switch (systemState) {
+    case STATE_STARTING: {
+      break;
+    }
     case STATE_READY_TO_LAUNCH: {
       // hasLaunched needs to be called before logData
       // Both functions clear any high-G interrupts, but hasLaunched needs to read them first
@@ -104,13 +107,7 @@ void handleState() { // operations and transition functions
         return setState(STATE_ASCENT);
       }
 
-      if (fileOpen()) {
-        getSensorData();
-      } else {
-        error("Data file closed unexpectedly", false);
-        logEvent(systemState, STATE_FILE_CLOSED, EVENT_OTHER);
-        return setState(STATE_FILE_CLOSED); // TODO: log events here?
-      }
+      getSensorData();
       break;
     }
     case STATE_ASCENT: {
@@ -128,19 +125,9 @@ void handleState() { // operations and transition functions
 
       // TODO: Transition function should probably be some threshold for chute deploy
       //  bar+gyro+acc all crazy within 0.1s of each other?
-      // if (fileOpen()) {
-      //   getSensorData();
-      // } else {
-      //   error("Data file closed unexpectedly", false);
-      //   logEvent(systemState, STATE_FILE_CLOSED, EVENT_OTHER); // TODO: Make this an error flag so it stays in the same state
-      //   return setState(STATE_FILE_CLOSED);
-      // }
       break;
     }
     case STATE_FILE_CLOSED: {
-      break;
-    }
-    case STATE_STARTING: {
       break;
     }
     case STATE_WARNING: { // TODO: Warning should be a flag in Ready to Launch, not a state
@@ -155,7 +142,13 @@ void handleState() { // operations and transition functions
   pixel.show();
 }
 
-void setState(SystemState state) {
+void setState(const SystemState state) {
+#if DEBUG
+  Serial.print("State change: ");
+  Serial.print(systemState);
+  Serial.print(" -> ");
+  Serial.println(state);
+#endif
   systemState = state;
   handleState();
   // If called in handleState, this could theoretically cause a bug where it detects a state change,
