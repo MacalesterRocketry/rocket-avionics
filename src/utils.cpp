@@ -25,10 +25,10 @@
   return {w,-x,-y,-z};
 }
 
-void Quat::normalise() {
+Quat Quat::normalized() const {
   const double n = norm();
-  if(n <= 1e-15) { w = 1; x = y = z = 0; return; }
-  w /= n; x /= n; y /= n; z /= n;
+  if(n <= 1e-15) { return {1,0,0,0}; }
+  return {w/n, x/n, y/n, z/n};
 }
 
 // convert quaternion using rotation matrix (body -> earth if q maps body->earth)
@@ -50,4 +50,11 @@ void Quat::normalise() {
 // Limit values for gain stability(sensor values and noise handling)
 double clamp(const double num, const double low, const double high) {
   return num < low ? low : (num > high ? high : num);
+}
+
+Deg radToDeg(const Rad radians) {
+  return radians * 180.0 / M_PI;
+}
+Rad degToRad(const Deg degrees) {
+  return degrees * M_PI / 180.0;
 }

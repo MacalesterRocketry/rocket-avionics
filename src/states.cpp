@@ -3,6 +3,7 @@
 #include "Adafruit_NeoPixel.h"
 #include "orientation/ahrs.h"
 #include "orientation/sensors.h"
+#include "output/roll-controller.h"
 
 Adafruit_NeoPixel pixel = Adafruit_NeoPixel(1, NEOPIXEL_PIN);
 
@@ -28,7 +29,7 @@ void wait(const int milliseconds) {
   }
 }
 
-SensorReadings getSensorData() { // TODO: return a struct from this, which can then be used for updateAHRS
+SensorReadings getSensorData() {
 #if USE_GPS
   readGPS();
 #endif
@@ -90,52 +91,43 @@ void handleState() { // operations and transition functions
   }
 
   switch (systemState) {
+    case STATE_STARTING: {
+      break;
+    }
     case STATE_READY_TO_LAUNCH: {
       // hasLaunched needs to be called before logData
       // Both functions clear any high-G interrupts, but hasLaunched needs to read them first
       // Only true when using interrupts, which we're not right now, but I'm leaving it.
       if (hasLaunched()) {
         logEvent(systemState, STATE_ASCENT, EVENT_LAUNCH_DETECTED);
-        initAHRS();
+        start_ahrs();
 #if DEBUG
         Serial.println("Launch detected!");
 #endif
         return setState(STATE_ASCENT);
       }
 
-      if (fileOpen()) {
-        getSensorData();
-      } else {
-        error("Data file closed unexpectedly", false);
-        logEvent(systemState, STATE_FILE_CLOSED, EVENT_OTHER);
-        return setState(STATE_FILE_CLOSED); // TODO: log events here?
-      }
+      getSensorData();
       break;
     }
     case STATE_ASCENT: {
       const SensorReadings sensorData = getSensorData();
-      updateAHRS(sensorData.lsm.gyro, sensorData.adxl.highg_accel, sensorData.lis3.mag);
-      Quat orientation = getCurrentOrientation();
-      logQuaternion(orientation);
-      // TODO: Use orientation for PID stuff
-      // TODO: Log orientation to SD card
-      
+      Vec3 accel = sensorData.lsm.accel;
+      if (accel.mag() >= ACCELEROMETER_SWITCH_THRESHOLD) { // If the low-G accelerometer is saturated, switch to high-G readings for AHRS
+        accel = sensorData.adxl.highg_accel;
+      }
+      update_ahrs(sensorData.lsm.gyro, accel, sensorData.lis3.mag);
+      logAHRS(get_orientation(), get_acceleration(), get_velocity(), get_position());
+
+      // Actuate roll control surfaces based on current orientation and target angle
+      static const Quat base_orientation = get_orientation(); // Set the base orientation at launch
+      update_roll(0, base_orientation); // TODO: Target angle should be based on a flight plan, not just 0
 
       // TODO: Transition function should probably be some threshold for chute deploy
-      // bar+gyro+acc all crazy within 0.1s of each other?
-      // if (fileOpen()) {
-      //   getSensorData();
-      // } else {
-      //   error("Data file closed unexpectedly", false);
-      //   logEvent(systemState, STATE_FILE_CLOSED, EVENT_OTHER); // TODO: Make this an error flag so it stays in the same state
-      //   return setState(STATE_FILE_CLOSED);
-      // }
+      //  bar+gyro+acc all crazy within 0.1s of each other?
       break;
     }
     case STATE_FILE_CLOSED: {
-      break;
-    }
-    case STATE_STARTING: {
       break;
     }
     case STATE_WARNING: { // TODO: Warning should be a flag in Ready to Launch, not a state
@@ -144,11 +136,19 @@ void handleState() { // operations and transition functions
     case STATE_ERROR: {
       break;
     }
+    case STATE_IRRELEVANT:
+      break;
   }
   pixel.show();
 }
 
-void setState(SystemState state) {
+void setState(const SystemState state) {
+#if DEBUG
+  Serial.print("State change: ");
+  Serial.print(systemState);
+  Serial.print(" -> ");
+  Serial.println(state);
+#endif
   systemState = state;
   handleState();
   // If called in handleState, this could theoretically cause a bug where it detects a state change,

@@ -36,9 +36,18 @@ void setup() {
 
   pinMode(EJECT_BUTTON, INPUT_PULLUP);
   initSDCard();
+#if DEBUG
+  Serial.println("SD card initialized.");
+#endif
   initSensors();
+#if DEBUG
+  Serial.println("Sensors initialized.");
+#endif
 #if USE_GPS
   initGPS();
+#if DEBUG
+  Serial.println("GPS initialized.");
+#endif
 #endif
 
   setState(STATE_READY_TO_LAUNCH);

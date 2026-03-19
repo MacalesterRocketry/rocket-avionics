@@ -140,7 +140,7 @@ typedef struct Quat : Vec4Base<double, Quat> {
 
   [[nodiscard]] Quat conjugate() const;
 
-  void normalise();
+  [[nodiscard]] Quat normalized() const;
 
   [[nodiscard]] std::array<std::array<double,3>,3> toMatrix() const;
   Quat() = default;
@@ -177,6 +177,10 @@ struct SensorReadings {
   BMPReading bmp;
 };
 
+using Deg = double;
+using Rad = double;
+Deg radToDeg(Rad radians);
+Rad degToRad(Deg degrees);
 
 // Logging
 enum PacketType : uint8_t {
@@ -187,8 +191,8 @@ enum PacketType : uint8_t {
   PACKET_GPS      = 0x20, // GPS (includes time, position, etc.)
   PACKET_DATETIME = 0x21, // Date and Time from GPS
   PACKET_EVENT    = 0x30, // Discrete Events (Launch, Apogee)
-  PACKET_STATUS   = 0x40,  // Battery, etc.
-  PACKET_QUATERNION = 0x50 // Quaternion data
+  PACKET_STATUS   = 0x40, // Battery, etc.
+  PACKET_AHRS     = 0x50, // Quaternion, earth-frame acceleration, velocity, position
 };
 
 enum EventType : uint8_t {

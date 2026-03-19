@@ -3,6 +3,8 @@
 #include "../states.h"
 #include "../utils.h"
 
+#include "millis64.h"
+
 SdFat SD;
 SdFile dataFile;
 SdSpiConfig config(SD_CS_PIN, DEDICATED_SPI, SD_SCK_MHZ(50), &SPI1); // 50MHz is fast, good for RP2040
@@ -26,7 +28,7 @@ void initSDCard() {
 
   // create a new file name, incrementing if it's already used
   char filename[15];
-  strcpy(filename, "log00.bin"); // TODO: Use datetime
+  strcpy(filename, "log00.bin");
   for (uint8_t i = 0; i < 100; i++) {
     filename[3] = i / 10 + '0';
     filename[4] = i % 10 + '0';
@@ -62,17 +64,16 @@ bool fileOpen() {
 
 void logPacket(const PacketType type, const void* data, const size_t size) {
   if (!fileOpen()) {
-    error("Data file closed unexpectedly", false);
+    error("Data file closed unexpectedly when logging", false);
     // logEvent(systemState, STATE_FILE_CLOSED, EVENT_OTHER); // TODO: Make this an error flag so it stays in the same state
     // setState(STATE_FILE_CLOSED);
     return;
   }
-  // Packet layout: 1B type + 4B micros + 4B millis + N bytes data (depends on type)
+  // Packet layout: 1B type + 8B micros + N bytes data (depends on type)
 
   PacketHeader header{};
   header.type = type;
-  header.timestamp_millis = millis();
-  header.timestamp_micros = micros();
+  header.timestamp_micros = micros64();
 
   dataFile.write(&header, sizeof(header));
   dataFile.write(data, size);
@@ -144,14 +145,23 @@ void logStatus(const uint8_t currentState, const float batteryVoltage, const uin
   logPacket(PACKET_STATUS, &data, sizeof(data));
 }
 
-void logQuaternion(const Quat& orientation) {
-  const PayloadQuaternion data = {
+void logAHRS(const Quat& orientation, const Vec3& acceleration, const Vec3& velocity, const Vec3& position) {
+  const PayloadAHRS data = { // TODO: This is massive. Do we really want all of this?
     static_cast<float>(orientation.w),
     static_cast<float>(orientation.x),
     static_cast<float>(orientation.y),
-    static_cast<float>(orientation.z)
+    static_cast<float>(orientation.z),
+    static_cast<float>(acceleration.x),
+    static_cast<float>(acceleration.y),
+    static_cast<float>(acceleration.z),
+    static_cast<float>(velocity.x),
+    static_cast<float>(velocity.y),
+    static_cast<float>(velocity.z),
+    static_cast<float>(position.x),
+    static_cast<float>(position.y),
+    static_cast<float>(position.z)
   };
-  logPacket(PACKET_QUATERNION, &data, sizeof(data));
+  logPacket(PACKET_AHRS, &data, sizeof(data));
 }
 
 void logDatetime(const uint16_t year, const uint8_t month, const uint8_t day,

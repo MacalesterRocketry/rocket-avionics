@@ -1,60 +1,87 @@
-#include "roll-controller.h"
-#include "../orientation/sensors.h"
-#include "../flags.h"
-#include "../utils.h"
+#include "states.h"
+#include "orientation/ahrs.h"
+#include "output/roll-controller.h"
+#include "output/servo.h"
+#include "utils.h"
 
-// init vars
-double integral_sum = 0;
-double last_error = 0;
-double last_update_time = 0;
-double current_servo_angle = (MAX_SERVO_ANGLE - MIN_SERVO_ANGLE) / 2.0f; // start in middle
+#include "millis64.h"
 
-double calculate_servo_angle(const double airspeed,
-                             const double current_rocket_angle,
-                             const double target_rocket_angle) {
-  // call in main loop
-  if (abs(current_rocket_angle - target_rocket_angle) > 0.001) {
-    // while setpoint isn't reached
-    unsigned long now = millis(); // TODO: Should probably add in micros somehow for more precision.
-    double target_servo_angle = 0.0f;
+// Effectiveness is the slope of the deflection vs torque curve at zero deflection, which is what we want for the linear approximation. We can adjust it later if we want to get fancy and account for nonlinearity at higher deflections.
+// Using deflection in degrees, so effectiveness is in Nm/deg
+double calculate_effectiveness(const Vec3 &velocity) {
+  return 1.0 / 360; // Placeholder value
+}
 
-    // time delta (how long since last calculation)
-    const double dt = now - last_update_time;
-    // if no time has passed, don't make any changes.
-    if (dt <= 0)
-      return current_servo_angle;
+Deg calculate_deflection_pid(const Quat& qtarget, const double dt) {
+  static double integral = 0;
+  Quat qcurrent = get_orientation();
 
-    // calculate the error (reference-actual)
-    auto error = target_rocket_angle - current_rocket_angle;
+  // ============================================
+  // ERROR CALCULATION
+  // ============================================
 
-    // calculate the integral
-    integral_sum += error * dt; // add to the integral history
+  // Compute quaternion error
+  Quat qrollerror = (qcurrent.conjugate() * qtarget).normalized();
 
-    // calculate the derivative (rate of change, slope of line) term
-    auto derivative = (error - last_error) / dt;
+  // Convert to angular error
+  double eroll_x = 2 * qrollerror.x;        // X-component = roll error
 
-    // add the appropriate corrections
-    target_servo_angle = Kp * (error + Ki * integral_sum + Kd * derivative) / airspeed;
+  // TORQUE PID CALCULATION
 
-    // clamp
-    target_servo_angle = clamp(target_servo_angle, MIN_SERVO_ANGLE, MAX_SERVO_ANGLE);
-    // TODO: Should probably log that it can't make the changes it wants
+  // PID terms
+  const double ang_accel_p = ROLL_PID_Kp * eroll_x;
+  integral += eroll_x * dt;
+  const double ang_accel_i = ROLL_PID_Ki * integral;
+  const double ang_accel_d = -ROLL_PID_Kd * get_angular_velocity().x; // TODO: Is x the right axis?
 
-#if PID_TUNING
-    Serial.print("SP+PV+PID+O," +
-                 String(target_servo_angle) + "," +
-                 String(current_servo_angle) + "," +
-                 String(target_servo_angle) + "," +
-                 String(integral_sum) + "," +
-                 String(derivative));
-#endif // PID_TUNING
+  // Total desired angular acceleration
+  const double ang_accel_desired = ang_accel_p + ang_accel_i + ang_accel_d;
+  const double torque_desired = ang_accel_desired * MOMENT_OF_INERTIA; // τ = I * α
 
-    // persist our state variables
-    current_servo_angle = target_servo_angle;
-    last_error = error;
-    last_update_time = now;
+  // adjusted: Look up effectiveness AT ZERO deflection
+  const double effectiveness_zero = calculate_effectiveness(get_velocity());
 
-    return target_servo_angle;
+  // Compute fin deflection using linear approximation
+  const double fin_deflection_angle = torque_desired / effectiveness_zero;
+
+  return fin_deflection_angle;
+}
+
+void update_roll(const Deg target_angle, const Quat& base_orientation) {
+  // Start
+  const Quat qcurrent = get_orientation(); // Current orientation (Q4)
+  const Deg current_angle = calculate_roll_deg(qcurrent); // Current roll angle in degrees (from Q4)
+
+  // If it is angled, we need to adjust that tilt before storing the orientation)
+  // TODO: Figure out what this comment means
+
+  // BUILD ROLL QUATERNION
+  // const Quat qroll = Quat{cos(roll_angle_rad/2), sin(roll_angle_rad/2), 0, 0}; // Roll by 90°
+  // TODO: The old was x: sin(angle/2), but the new one has x: sin(angle). Should the Vec3 passed into axisAngleToQuat be {0.5, 0, 0}? Check this all with Tala.
+  const Quat qroll = roll_deg_to_quat(-target_angle); // Negative for body frame
+  const Quat qtarget = (base_orientation * qroll).normalized(); // Target orientation; TODO: This probably has different pitch and yaw than what we actually want. Replace them with the current ones from qcurrent? Or just ignore them since we're only controlling roll?
+
+  // CONTROL LOOP (Until target reached)
+  static uint64_t last_time = micros64();
+  if (abs(target_angle - current_angle) > 1) {
+    const uint64_t now_micros = micros64();
+    const double dt = (now_micros - last_time) / 1000000.0;
+    const double fin_deflection_angle = calculate_deflection_pid(qtarget, dt);
+#if DEBUG and DEBUG_PRINT_ROLL_CONTROL
+    Serial.print("Target Roll: ");
+    Serial.print(target_angle);
+    Serial.print("°, Current Roll: ");
+    Serial.print(current_angle);
+    Serial.print("°, Fin Deflection: ");
+    Serial.print(fin_deflection_angle);
+    Serial.println("°");
+#endif
+
+    // Command servos
+    for (Servo &servo : servos) {
+      set_servo_angle(servo, fin_deflection_angle);
+    }
+
+    last_time = now_micros;
   }
-  return current_servo_angle;
 }

@@ -24,8 +24,8 @@ Vec3 rotateBodyToEarth(const Quat& q, const Vec3& v_b) {
 // small helper: axis-angle -> quaternion exact
 Quat axisAngleToQuat(const Vec3& axis, const double angle) {
   const double half = angle * 0.5;
-  const double s = std::sin(half);
-  return Quat{std::cos(half), axis.x * s, axis.y * s, axis.z * s};
+  const double s = sin(half);
+  return Quat{cos(half), axis.x * s, axis.y * s, axis.z * s};
 }
 
 // build delta quaternion(propagation) from angular rate omega (rad/s) and dt
@@ -178,158 +178,143 @@ Vec3 computeBiasMean(const std::vector<Vec3>& samples) {
 // AHRS Current State
 struct AHRSState {
   Quat q = {1.0, 0.0, 0.0, 0.0}; // Current orientation quaternion
-  Vec3 gyroBias = {0.0, 0.0, 0.0};
-  Vec3 accelBias = {0.0, 0.0, 0.0};
-  Vec3 magBias = {0.0, 0.0, 0.0};
   double beta = 0.1; // Madgwick filter gain
   uint64_t lastUpdate = 0;
-  bool isCalibrated = false;
-  uint64_t calibrationStart = 0;
-  std::vector<Vec3> gyroSamples, accelSamples, magSamples;
+  Vec3 acceleration = {0, 0, 0};
+  Vec3 velocity = {0, 0, 0};
+  Vec3 position = {0, 0, 0};
+  Vec3 angular_velocity = {0, 0, 0};
 };
 static AHRSState state;
 
-const Vec3 calc_gyro_corrected(const Vec3& gyroRaw) {
-  return Vec3{
-    gyroRaw.x - state.gyroBias.x,
-    gyroRaw.y - state.gyroBias.y,
-    gyroRaw.z - state.gyroBias.z
-  };
-}
-const Vec3 calc_accel_corrected(const Vec3& accelRaw) {
-  return Vec3{
-    accelRaw.x - state.accelBias.x,
-    accelRaw.y - state.accelBias.y,
-    accelRaw.z - state.accelBias.z
-  };
-}
-const Vec3 calc_mag_corrected(const Vec3& magRaw) {
-  return Vec3{
-    magRaw.x - state.magBias.x,
-    magRaw.y - state.magBias.y,
-    magRaw.z - state.magBias.z
-  };
-}
-
-void updateAHRS(const Vec3& gyroRaw, const Vec3& accelRaw, const Vec3& magRaw) {
+void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
   // Used to Calculate delta time
-  const uint64_t now = micros64();
-  double dt = (now - state.lastUpdate) / 1000000.0;
-  state.lastUpdate = now;
+  const uint64_t now_micros = micros64();
+  const double dt = (now_micros - state.lastUpdate) / 1000000.0;
+  state.lastUpdate = now_micros;
 
-  if (dt <= 0 || dt > 0.1) {
-    dt = 0.01;
-  }
-
-  // Auto-calibration phase (first 3 seconds or longer if needed)
-  if (!state.isCalibrated) {
-    if (state.calibrationStart == 0) {
-      state.calibrationStart = now;
-      Serial.println("Auto-calibration started - keep IMU stationary...");
-    }
-    // Collect calibration samples for 3 seconds; we can adjust this duration as needed??
-    if (now - state.calibrationStart < 3000000) {
-      state.gyroSamples.push_back(gyroRaw);
-      state.accelSamples.push_back(accelRaw);
-      state.magSamples.push_back(magRaw);
-
-      // Display calibration progress
-      static unsigned long lastCalibPrint = 0;
-      if (now - lastCalibPrint > 500000) {
-        float progress = (now - state.calibrationStart) / 3000000.0 * 100.0;
-        Serial.printf("Calibrating... %.0f%%\n", progress);
-        lastCalibPrint = now;
-      }
-      return;
-    } else {
-      // Calibration complete from the steps above - now compute biases
-      state.gyroBias = computeBiasMean(state.gyroSamples);
-      state.accelBias = computeBiasMean(state.accelSamples);
-      state.magBias = computeBiasMean(state.magSamples);
-
-      // Adjustment for rocket launch position (Z-up coordinate system/nose up)
-      state.accelBias.z += 9.81; // TODO: Figure out if this should be y
-
-      state.isCalibrated = true;
-      state.gyroSamples.clear();
-      state.accelSamples.clear();
-      state.magSamples.clear();
-
-      Serial.println("Calibration complete!");
-      Serial.printf("Gyro bias: %.4f, %.4f, %.4f rad/s\n",
-                    state.gyroBias.x, state.gyroBias.y, state.gyroBias.z);
-      Serial.printf("Accel bias: %.4f, %.4f, %.4f m/s²\n",
-                    state.accelBias.x, state.accelBias.y, state.accelBias.z);
-    }
+  if (dt <= 0) {
+    return; // Invalid time step, skip update
   }
 
   //  COMPLETE Q0 → Q4
   // Step 0: Initial quaternion (q0) - previous orientation
   const Quat q0 = state.q;
 
-  // Step 1: Bias correction and sensor adjustment
-  const Vec3 gyroCorrected = calc_gyro_corrected(gyroRaw);
-  const Vec3 accelCorrected = calc_accel_corrected(accelRaw);
-  const Vec3 magCorrected = calc_mag_corrected(magRaw);
-
   // Step 2: Gyro propagation (q1) - integrate angular rates
-  const Quat delta_q = deltaQuatFromGyro(gyroCorrected, dt);
+  const Quat delta_q = deltaQuatFromGyro(gyro, dt);
   const Quat q1 = q0 * delta_q;
 
   // Step 3: Normalise (q2) - maintain quaternion unit length
   Quat q2 = q1;
-  q2.normalise();
+  q2 = q2.normalized();
 
   // Step 4: Madgwick sensor fusion correction (q3) - fuse with accelerometer and magnetometer
-  const Quat q3 = madgwickCorrectionStep(q2, accelCorrected, magCorrected, gyroCorrected, state.beta, dt);
+  const Quat q3 = madgwickCorrectionStep(q2, accel, mag, gyro, state.beta, dt);
 
   // Step 5: Final normalisation (q4) - ensure valid quaternion
   Quat q4 = q3;
-  q4.normalise();
+  q4 = q4.normalized();
 
   // Update state with final quaternion, final state
   state.q = q4;
 
   // EARTH FRAME CONVERSIONS
   // Convert body-frame measurements to earth frame for control systems
-  const Vec3 earthAccel = rotateBodyToEarth(q4, accelCorrected);
-  const Vec3 earthGyro = rotateBodyToEarth(q4, gyroCorrected);
-  const Vec3 earthMag = rotateBodyToEarth(q4, magCorrected);
+  const Vec3 earthAccel = rotateBodyToEarth(q4, accel);
+  const Vec3 earthGyro = rotateBodyToEarth(q4, gyro);
+  const Vec3 earthMag = rotateBodyToEarth(q4, mag);
+
+  state.acceleration = earthAccel;
+  state.velocity += earthAccel * dt;
+  state.position += state.velocity * dt;
+
+  state.angular_velocity = gyro; // still in body frame, but we can use it for control
 
   // CONTINUOUS ORIENTATION MONITORING/Active Tracking
+#if DEBUG and DEBUG_PRINT_ORIENTATION
   static unsigned long lastPrint = 0;
-  if (now - lastPrint > 100000) {
+  if (now_micros - lastPrint > 100000) {
     // Convert quaternion to Euler angles
-    const double roll = atan2(2.0 * (q4.w * q4.x + q4.y * q4.z),
-                              1.0 - 2.0 * (q4.x * q4.x + q4.y * q4.y));
-    const double pitch = asin(2.0 * (q4.w * q4.y - q4.z * q4.x));
-    const double yaw = atan2(2.0 * (q4.w * q4.z + q4.x * q4.y),
-                             1.0 - 2.0 * (q4.y * q4.y + q4.z * q4.z));
+    const double roll = calculate_roll_deg(state.q);
+    const double pitch = calculate_pitch_deg(state.q);
+    const double yaw = calculate_yaw_deg(state.q);
 
     // Display orientation and earth-frame data
     Serial.println("ROCKET ORIENTATION");
     Serial.printf("Quaternion: w=%.3f, x=%.3f, y=%.3f, z=%.3f\n",
-                  q4.w, q4.x, q4.y, q4.z);
+                  state.q.w, state.q.x, state.q.y, state.q.z);
     Serial.printf("Euler: Roll=%.1f°, Pitch=%.1f°, Yaw=%.1f°\n",
-                  roll * 180 / M_PI, pitch * 180 / M_PI, yaw * 180 / M_PI);
+                  roll, pitch, yaw);
     Serial.printf("Earth Accel: X=%.2f, Y=%.2f, Z=%.2f m/s²\n",
-                  earthAccel.x, earthAccel.y, earthAccel.z);
-    Serial.printf("Earth Gyro: X=%.2f, Y=%.2f, Z=%.2f rad/s\n",
-                  earthGyro.x, earthGyro.y, earthGyro.z);
+                  state.acceleration.x, state.acceleration.y, state.acceleration.z);
+    Serial.printf("Earth Velocity: X=%.2f, Y=%.2f, Z=%.2f m/s\n",)
+                  state.velocity.x, state.velocity.y, state.velocity.z);
+    Serial.printf("Earth Position: X=%.2f, Y=%.2f, Z=%.2f m\n",)
+                  state.position.x, state.position.y, state.position.z);
     Serial.println("==========================");
 
-    lastPrint = now;
+    lastPrint = now_micros;
   }
+#endif
 }
-
-
-void initAHRS() {
+void start_ahrs() {
   state.lastUpdate = micros64();
-  state.gyroSamples.clear();
-  state.accelSamples.clear();
-  state.magSamples.clear();
+}
+Quat get_orientation() {
+  return state.q;
 }
 
-Quat getCurrentOrientation() {
-  return state.q;
+Vec3 get_acceleration() {
+  return state.acceleration;
+}
+Vec3 get_velocity() {
+  return state.velocity;
+}
+Vec3 get_position() {
+  return state.position;
+}
+Vec3 get_angular_velocity() {
+  return state.angular_velocity;
+}
+
+Rad calculate_roll_rad(const Quat& q) {
+  return atan2(2.0 * (q.w * q.x + q.y * q.z),
+               1.0 - 2.0 * (q.x * q.x + q.y * q.y));
+}
+
+Rad calculate_pitch_rad(const Quat& q) {
+  return asin(2.0 * (q.w * q.y - q.z * q.x));
+}
+
+Rad calculate_yaw_rad(const Quat& q) {
+  return atan2(2.0 * (q.w * q.z + q.x * q.y),
+               1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+}
+
+Deg calculate_roll_deg(const Quat& q) {
+  return radToDeg(calculate_roll_rad(q));
+}
+
+Deg calculate_pitch_deg(const Quat& q) {
+  return radToDeg(calculate_pitch_rad(q));
+}
+
+Deg calculate_yaw_deg(const Quat& q) {
+  return radToDeg(calculate_yaw_rad(q));
+}
+
+Quat roll_deg_to_quat(const Deg roll) {
+  const double roll_rad = degToRad(roll);
+  return axisAngleToQuat({1, 0, 0}, roll_rad);
+}
+
+Quat yaw_deg_to_quat(const Deg yaw) {
+  const double yaw_rad = degToRad(yaw);
+  return axisAngleToQuat({0, 0, 1}, yaw_rad);
+}
+
+Quat pitch_deg_to_quat(const Deg pitch) {
+  const double pitch_rad = degToRad(pitch);
+  return axisAngleToQuat({0, 1, 0}, pitch_rad);
 }

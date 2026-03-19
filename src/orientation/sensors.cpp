@@ -104,40 +104,55 @@ void initSensors() {
 
 LSMReading readLSM() {
   lsm6dsox.getEvent(&lowg_accel, &gyro, &lsm6ds_temp);
-  logIMU(lowg_accel.acceleration.x, lowg_accel.acceleration.y, lowg_accel.acceleration.z,
-         gyro.gyro.x, gyro.gyro.y, gyro.gyro.z,
-         lsm6ds_temp.temperature);
-#if DEBUG and DEBUG_PRINT_SENSORS
-  Serial.printf("Low-G Accel: %.2f X, %.2f Y, %.2f Z\n", lowg_accel.acceleration.x, lowg_accel.acceleration.y, lowg_accel.acceleration.z);
-  Serial.printf("Gyro: %.2f X, %.2f Y, %.2f Z, temp: %.2f\n", gyro.gyro.x, gyro.gyro.y, gyro.gyro.z, lsm6ds_temp.temperature);
-#endif
-  return LSMReading {
-    .accel = {lowg_accel.acceleration.x, lowg_accel.acceleration.y, lowg_accel.acceleration.z},
-    .gyro = {gyro.gyro.x, gyro.gyro.y, gyro.gyro.z},
+  const LSMReading reading{
+    .accel = {
+      lowg_accel.acceleration.x - LOWG_BIAS_X,
+      lowg_accel.acceleration.y - LOWG_BIAS_Y,
+      lowg_accel.acceleration.z - LOWG_BIAS_Z
+    },
+    .gyro = {gyro.gyro.x - GYRO_BIAS_X, gyro.gyro.y - GYRO_BIAS_Y, gyro.gyro.z - GYRO_BIAS_Z},
     .temperature = lsm6ds_temp.temperature
   };
+  logIMU(reading.accel.x, reading.accel.y, reading.accel.z,
+         reading.gyro.x, reading.gyro.y, reading.gyro.z,
+         reading.temperature);
+#if DEBUG and DEBUG_PRINT_SENSORS
+  Serial.printf("Low-G Accel: %.2f X, %.2f Y, %.2f Z\n", reading.accel.x, reading.accel.y, reading.accel.z);
+  Serial.printf("Gyro: %.2f X, %.2f Y, %.2f Z, temp: %.2f\n", reading.gyro.x, reading.gyro.y, reading.gyro.z, reading.temperature);
+#endif
+  return reading;
 }
 
 LIS3Reading readLIS3() {
   lis3mdl.getEvent(&magnetometer);
-  logMagnetometer(magnetometer.magnetic.x, magnetometer.magnetic.y, magnetometer.magnetic.z);
-#if DEBUG and DEBUG_PRINT_SENSORS
-  Serial.printf("Mag: %.2f X, %.2f Y, %.2f Z\n", magnetometer.magnetic.x, magnetometer.magnetic.y, magnetometer.magnetic.z);
-#endif
-  return LIS3Reading {
-    .mag = {magnetometer.magnetic.x, magnetometer.magnetic.y, magnetometer.magnetic.z}
+  const LIS3Reading reading{
+    .mag = {
+      magnetometer.magnetic.x - MAG_BIAS_X,
+      magnetometer.magnetic.y - MAG_BIAS_Y,
+      magnetometer.magnetic.z - MAG_BIAS_Z
+    }
   };
+  logMagnetometer(reading.mag.x, reading.mag.y, reading.mag.z);
+#if DEBUG and DEBUG_PRINT_SENSORS
+  Serial.printf("Mag: %.2f X, %.2f Y, %.2f Z\n", reading.mag.x, reading.mag.y, reading.mag.z);
+#endif
+  return reading;
 }
 
 ADXLReading readADXL() {
   adxl_accel.getEvent(&highg_accel);
-  logHighG(highg_accel.acceleration.x, highg_accel.acceleration.y, highg_accel.acceleration.z);
-#if DEBUG and DEBUG_PRINT_SENSORS
-  Serial.printf("High-G Accel: %.2f X, %.2f Y, %.2f Z\n", highg_accel.acceleration.x, highg_accel.acceleration.y, highg_accel.acceleration.z);
-#endif
-  return ADXLReading {
-    .highg_accel = {highg_accel.acceleration.x, highg_accel.acceleration.y, highg_accel.acceleration.z}
+  const ADXLReading reading{
+    .highg_accel = {
+      highg_accel.acceleration.x - HIGHG_BIAS_X,
+      highg_accel.acceleration.y - HIGHG_BIAS_Y,
+      highg_accel.acceleration.z - HIGHG_BIAS_Z
+    }
   };
+  logHighG(reading.highg_accel.x, reading.highg_accel.y, reading.highg_accel.z);
+#if DEBUG and DEBUG_PRINT_SENSORS
+  Serial.printf("High-G Accel: %.2f X, %.2f Y, %.2f Z\n", reading.highg_accel.x, reading.highg_accel.y, reading.highg_accel.z);
+#endif
+  return reading;
 }
 
 BMPReading readBMP() {
