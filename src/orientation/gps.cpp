@@ -1,8 +1,9 @@
-#include "gps.h"
+#include "orientation/gps.h"
+
+#include "output/sdcard.h"
+#include "states.h"
 
 #include "Adafruit_GPS.h"
-#include "sdcard.h"
-#include "states.h"
 #include "pico/stdlib.h"
 
 struct repeating_timer gps_timer;

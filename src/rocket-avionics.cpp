@@ -10,12 +10,14 @@ void loop() {
   servo_test_loop();
 }
 #else // !SERVO_TESTING
+#include <Wire.h>
+
 #include "states.h"
 #include "utils.h"
-#include "sdcard.h"
-#include "sensors.h"
+#include "output/sdcard.h"
+#include "orientation/sensors.h"
 #if USE_GPS
-#include "gps.h"
+#include "orientation/gps.h"
 #endif
 
 void setup() {

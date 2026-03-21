@@ -1,9 +1,11 @@
 #include "states.h"
 
 #include "Adafruit_NeoPixel.h"
-#include "ahrs.h"
-#include "sensors.h"
-#include "roll-controller.h"
+
+#include "orientation/ahrs.h"
+#include "orientation/sensors.h"
+#include "output/roll-controller.h"
+#include "output/sdcard.h"
 
 Adafruit_NeoPixel pixel = Adafruit_NeoPixel(1, NEOPIXEL_PIN);
 
