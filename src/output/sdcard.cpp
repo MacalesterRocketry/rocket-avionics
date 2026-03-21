@@ -1,7 +1,7 @@
 #include "sdcard.h"
 
-#include "../states.h"
-#include "../utils.h"
+#include "states.h"
+#include "utils.h"
 
 #include "millis64.h"
 

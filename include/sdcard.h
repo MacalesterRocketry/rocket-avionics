@@ -1,11 +1,10 @@
 #ifndef ROCKET_AVIONICS_SD_CARD_H
 #define ROCKET_AVIONICS_SD_CARD_H
 
-#include <Arduino.h>
 #include <SdFat.h>
 
-#include "../flags.h"
-#include "../utils.h"
+#include "config.h"
+#include "utils.h"
 
 void initSDCard();
 void ejectSDCard();

@@ -2,7 +2,7 @@
 #define ROCKET_AVIONICS_UTILS_H
 
 #include <Arduino.h>
-#include "flags.h"
+#include "config.h"
 
 // Component Identifications
 struct Vec3;

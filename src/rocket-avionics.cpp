@@ -1,6 +1,4 @@
-#include <Arduino.h>
-
-#include "flags.h"
+#include "config.h"
 
 #if SERVO_TESTING
 #include "output/servo.h"
@@ -14,10 +12,10 @@ void loop() {
 #else // !SERVO_TESTING
 #include "states.h"
 #include "utils.h"
-#include "output/sdcard.h"
-#include "orientation/sensors.h"
+#include "sdcard.h"
+#include "sensors.h"
 #if USE_GPS
-#include "orientation/gps.h"
+#include "gps.h"
 #endif
 
 void setup() {

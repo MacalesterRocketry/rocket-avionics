@@ -1,7 +1,7 @@
 #include "states.h"
-#include "orientation/ahrs.h"
-#include "output/roll-controller.h"
-#include "output/servo.h"
+#include "ahrs.h"
+#include "roll-controller.h"
+#include "servo.h"
 #include "utils.h"
 
 #include "millis64.h"

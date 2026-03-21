@@ -1,16 +1,10 @@
-// AHRS LOOP
-// steps: Single-file AHRS loop: q0 -> bias-corrected sensors -> gyro propagate (q1) ->
-// normalise (q2) -> Madgwick correction (q3) -> normalise (q4 final orientation)
-// Replace the placeholder sensor reads functions with our IMU reads. DOUBLE CHECK I HAVE THE RIGHT ONES!!
-
 #include "ahrs.h"
-#include <Arduino.h>
 
 #include <vector>
 #include <cmath>
 
 #include "millis64.h"
-#include "../utils.h"
+#include "utils.h"
 
 // rotate a body-vector v_b into earth frame using quaternion q (body->earth)
 Vec3 rotateBodyToEarth(const Quat& q, const Vec3& v_b) {

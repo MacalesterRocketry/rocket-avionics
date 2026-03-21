@@ -1,8 +1,7 @@
 #include "servo.h"
 
-#include <Arduino.h>
 #include <Servo.h>
-#include "flags.h"
+#include "config.h"
 
 #include "millis64.h"
 #include "utils.h"

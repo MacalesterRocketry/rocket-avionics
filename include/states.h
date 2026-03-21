@@ -1,12 +1,10 @@
 #ifndef ROCKET_AVIONICS_STATES_H
 #define ROCKET_AVIONICS_STATES_H
 
-#include <Arduino.h>
-
-#include "flags.h"
+#include "config.h"
 #include "utils.h"
 #if USE_GPS
-#include "orientation/gps.h"
+#include "gps.h"
 #endif
 
 void handleState();
