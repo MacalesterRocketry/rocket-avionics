@@ -1,8 +1,8 @@
 #ifndef ROCKET_AVIONICS_UTILS_H
 #define ROCKET_AVIONICS_UTILS_H
-
-#include <Arduino.h>
-#include "config.h"
+#include <cmath>
+#include <hardware/timer.h>
+#include <pico/time.h>
 
 // Component Identifications
 struct Vec3;
@@ -149,6 +149,24 @@ typedef struct Quat : Vec4Base<double, Quat> {
 struct Grad4 : Vec4Base<double, Grad4> {
   using Vec4Base::Vec4Base;
 };
+
+constexpr uint64_t us_to_ms_64(const uint64_t us) {
+  return us / 1000U; // The RP2040 and RP2350 actually have hardware dividers. While those are for 32-bit division,
+  // the SDK has an algorithm to use them for 64-bit division as well, so this is still very fast.
+}
+
+inline uint64_t micros64() {
+  return time_us_64();
+}
+inline uint64_t millis64() {
+  return us_to_ms_64(time_us_64());
+}
+inline uint32_t micros32() {
+  return time_us_32();
+}
+inline uint32_t millis32() {
+  return us_to_ms(time_us_64());
+}
 
 struct LSMReading {
   Vec3 accel; // m/s²

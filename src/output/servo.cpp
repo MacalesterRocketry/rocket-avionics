@@ -1,9 +1,9 @@
 #include "output/servo.h"
-
-#include <Servo.h>
-#include "millis64.h"
+#include "config.h"
 
 #include "utils.h"
+
+#include <Servo.h>
 
 int32_t calc_servo_micros_position(const double_t progress) { // progress: 0.0 to 1.0
   return SERVO_MICROS_MIN + static_cast<int32_t>((SERVO_MICROS_MAX - SERVO_MICROS_MIN) * progress);

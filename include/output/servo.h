@@ -1,7 +1,6 @@
 #ifndef ROCKET_AVIONICS_SERVO_H
 #define ROCKET_AVIONICS_SERVO_H
 
-#include "config.h"
 #include <Servo.h>
 
 static Servo servoXPlus;

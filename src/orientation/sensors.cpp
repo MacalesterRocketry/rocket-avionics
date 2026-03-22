@@ -1,9 +1,7 @@
 #include "orientation/sensors.h"
+#include "config.h"
 
 #include "output/sdcard.h"
-#if USE_GPS
-#include "orientation/gps.h"
-#endif
 
 #include "Adafruit_ADXL375.h"
 #include "Adafruit_LIS3MDL.h"

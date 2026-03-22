@@ -1,10 +1,9 @@
-#include "states.h"
-#include "orientation/ahrs.h"
 #include "output/roll-controller.h"
+#include "config.h"
+
+#include "orientation/ahrs.h"
 #include "output/servo.h"
 #include "utils.h"
-
-#include "millis64.h"
 
 // Effectiveness is the slope of the deflection vs torque curve at zero deflection, which is what we want for the linear approximation. We can adjust it later if we want to get fancy and account for nonlinearity at higher deflections.
 // Using deflection in degrees, so effectiveness is in Nm/deg

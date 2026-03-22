@@ -9,7 +9,7 @@
 #define SYNC_INTERVAL_MS 5000
 #define SERVO_TESTING 0
 
-#define USE_GPS 0
+#define USE_GPS 1
 
 // Calibration
 #define G 9.80579 // North Branch gravity in m/s²

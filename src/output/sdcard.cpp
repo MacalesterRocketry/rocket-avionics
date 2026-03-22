@@ -1,9 +1,8 @@
 #include "output/sdcard.h"
+#include "config.h"
 
 #include "states.h"
 #include "utils.h"
-
-#include "millis64.h"
 
 SdFat SD;
 SdFile dataFile;

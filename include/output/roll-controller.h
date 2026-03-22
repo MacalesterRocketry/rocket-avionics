@@ -1,7 +1,6 @@
 #ifndef ROCKET_AVIONICS_ROLL_CONTROLLER_H
 #define ROCKET_AVIONICS_ROLL_CONTROLLER_H
 
-#include "config.h"
 #include "utils.h"
 
 void update_roll(Deg target_angle, const Quat& base_orientation);

@@ -14,11 +14,11 @@ void loop() {
 
 #include "states.h"
 #include "utils.h"
-#include "output/sdcard.h"
 #include "orientation/sensors.h"
 #if USE_GPS
 #include "orientation/gps.h"
 #endif
+#include "output/sdcard.h"
 
 void setup() {
   setState(STATE_STARTING);
