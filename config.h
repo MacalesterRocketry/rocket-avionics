@@ -1,9 +1,12 @@
 #pragma once
 
-#define DEBUG 0
+// TODO: Sometimes the servos move only every 5 seconds; troubleshoot
+// TODO: Sometimes the launch detection doesn't respond; troubleshoot
+
+#define DEBUG 1
 #define DEBUG_PRINT_SENSORS 0
 #define DEBUG_PRINT_ORIENTATION 1
-#define DEBUG_PRINT_ROLL_CONTROL 1
+#define DEBUG_PRINT_ROLL_CONTROL 0
 
 #define PID_TUNING 0
 #define SYNC_INTERVAL_MS 5000

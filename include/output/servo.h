@@ -3,14 +3,17 @@
 
 #include <Servo.h>
 
-static Servo servoXPlus;
-static Servo servoXMinus;
-static Servo servoYPlus;
-static Servo servoYMinus;
-static Servo servos[] = {servoXPlus, servoXMinus, servoYPlus, servoYMinus};
+enum ServoID {
+  SERVO_XPLUS,
+  SERVO_XMINUS,
+  SERVO_YPLUS,
+  SERVO_YMINUS
+};
+
+static ServoID servos[] = {SERVO_XPLUS, SERVO_XMINUS, SERVO_YPLUS, SERVO_YMINUS};
 
 void init_servos();
 void servo_test_loop();
-void set_servo_angle(Servo& servo, double_t angle_degrees_from_neutral);
+void set_servo_angle(ServoID servo, double_t angle_degrees_from_neutral);
 
 #endif //ROCKET_AVIONICS_SERVO_H

@@ -77,7 +77,7 @@ void update_roll(const Deg target_angle, const Quat& base_orientation) {
 #endif
 
     // Command servos
-    for (Servo &servo : servos) {
+    for (const ServoID servo : servos) {
       set_servo_angle(servo, fin_deflection_angle);
     }
 

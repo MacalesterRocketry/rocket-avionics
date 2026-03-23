@@ -5,7 +5,7 @@
 
 #include <vector>
 #include <cmath>
-#include <cstdint>
+#include <SerialUSB.h>
 
 // rotate a body-vector v_b into earth frame using quaternion q (body->earth)
 Vec3 rotateBodyToEarth(const Quat& q, const Vec3& v_b) {
@@ -237,15 +237,15 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
 
     // Display orientation and earth-frame data
     Serial.println("ROCKET ORIENTATION");
-    Serial.printf("Quaternion: w=%.3f, x=%.3f, y=%.3f, z=%.3f\n",
+    Serial.printf("Quaternion: w=%.3f, x=%.3f, y=%.3f, z=%.3f\r\n",
                   state.q.w, state.q.x, state.q.y, state.q.z);
-    Serial.printf("Euler: Roll=%.1f°, Pitch=%.1f°, Yaw=%.1f°\n",
+    Serial.printf("Euler: Roll=%.1f°, Pitch=%.1f°, Yaw=%.1f°\r\n",
                   roll, pitch, yaw);
-    Serial.printf("Earth Accel: X=%.2f, Y=%.2f, Z=%.2f m/s²\n",
+    Serial.printf("Earth Accel: X=%.2f, Y=%.2f, Z=%.2f m/s²\r\n",
                   state.acceleration.x, state.acceleration.y, state.acceleration.z);
-    Serial.printf("Earth Velocity: X=%.2f, Y=%.2f, Z=%.2f m/s\n",)
+    Serial.printf("Earth Velocity: X=%.2f, Y=%.2f, Z=%.2f m/s\r\n",
                   state.velocity.x, state.velocity.y, state.velocity.z);
-    Serial.printf("Earth Position: X=%.2f, Y=%.2f, Z=%.2f m\n",)
+    Serial.printf("Earth Position: X=%.2f, Y=%.2f, Z=%.2f m\r\n",
                   state.position.x, state.position.y, state.position.z);
     Serial.println("==========================");
 

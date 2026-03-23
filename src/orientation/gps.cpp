@@ -80,10 +80,10 @@ void readGPS() {
 
 void printGPSData() {
   #if DEBUG and DEBUG_PRINT_SENSORS
-  Serial.printf("GPS time: %02d:%02d:%02d\n", GPS.hour, GPS.minute, GPS.seconds);
-  Serial.printf("Fix: %d, quality: %d, satellites: %d\n", GPS.fix, GPS.fixquality, GPS.satellites);
-  Serial.printf("Location: %.4f %c, %.4f %c\n", GPS.latitude, GPS.lat, GPS.longitude, GPS.lon);
-  Serial.printf("Speed (knots): %.2f, angle: %.2f, altitude: %.2f\n", GPS.speed, GPS.angle, GPS.altitude);
+  Serial.printf("GPS time: %02d:%02d:%02d\r\n", GPS.hour, GPS.minute, GPS.seconds);
+  Serial.printf("Fix: %d, quality: %d, satellites: %d\r\n", GPS.fix, GPS.fixquality, GPS.satellites);
+  Serial.printf("Location: %.4f %c, %.4f %c\r\n", GPS.latitude, GPS.lat, GPS.longitude, GPS.lon);
+  Serial.printf("Speed (knots): %.2f, angle: %.2f, altitude: %.2f\r\n", GPS.speed, GPS.angle, GPS.altitude);
   #endif
 
   logGPS(GPS.hour, GPS.minute, GPS.seconds, GPS.milliseconds,

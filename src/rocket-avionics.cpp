@@ -19,6 +19,7 @@ void loop() {
 #include "orientation/gps.h"
 #endif
 #include "output/sdcard.h"
+#include "output/servo.h"
 
 void setup() {
   setState(STATE_STARTING);
@@ -48,6 +49,10 @@ void setup() {
 #if DEBUG
   Serial.println("GPS initialized.");
 #endif
+#endif
+  init_servos();
+#if DEBUG
+  Serial.println("Servos initialized.");
 #endif
 
   setState(STATE_READY_TO_LAUNCH);

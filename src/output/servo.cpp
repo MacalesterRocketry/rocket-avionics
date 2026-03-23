@@ -5,11 +5,32 @@
 
 #include <Servo.h>
 
-int32_t calc_servo_micros_position(const double_t progress) { // progress: 0.0 to 1.0
+static Servo servoXPlus;
+static Servo servoXMinus;
+static Servo servoYPlus;
+static Servo servoYMinus;
+
+int32_t calc_servo_micros_position(const double_t progress) {
+  // progress: 0.0 to 1.0
   return SERVO_MICROS_MIN + static_cast<int32_t>((SERVO_MICROS_MAX - SERVO_MICROS_MIN) * progress);
 }
 
-void sweep_servo(Servo &servo, const double_t duration_seconds, const bool backwards=false) {
+Servo *get_servo(const ServoID id) {
+  switch (id) {
+    case SERVO_XPLUS:
+      return &servoXPlus;
+    case SERVO_XMINUS:
+      return &servoXMinus;
+    case SERVO_YPLUS:
+      return &servoYPlus;
+    case SERVO_YMINUS:
+      return &servoYMinus;
+    default:
+      return &servoXMinus; // default to something so it compiles, but this should never happen
+  }
+}
+
+void sweep_servo(const ServoID servo, const double_t duration_seconds, const bool backwards = false) {
   const uint64_t duration_us = static_cast<uint64_t>(duration_seconds * 1e6);
   const uint64_t startTime = micros64();
 
@@ -21,17 +42,15 @@ void sweep_servo(Servo &servo, const double_t duration_seconds, const bool backw
 
     if (progress >= 1.0) {
       if (backwards)
-        servo.writeMicroseconds(SERVO_MICROS_MIN);
+        set_servo_angle(servo, -(SERVO_DEGREE_RANGE / 2.0)); // return to min angle
       else
-        servo.writeMicroseconds(SERVO_MICROS_MAX);
+        set_servo_angle(servo, SERVO_DEGREE_RANGE / 2.0); // return to max angle
       break;
     }
 
-    const int32_t current_pos = backwards ?
-      calc_servo_micros_position(1.0 - progress) :
-      calc_servo_micros_position(progress);
-
-    servo.writeMicroseconds(current_pos);
+    double angle_coefficient = progress - 0.5;
+    if (backwards) angle_coefficient = -angle_coefficient;
+    set_servo_angle(servo, SERVO_DEGREE_RANGE * angle_coefficient);
   }
 }
 
@@ -40,33 +59,36 @@ void init_servos() {
   servoXMinus.attach(SERVO_XMINUS_PIN);
   servoYPlus.attach(SERVO_YPLUS_PIN);
   servoYMinus.attach(SERVO_YMINUS_PIN);
+  for (const ServoID servo : servos) {
+    set_servo_angle(servo, 0); // start at neutral position
+  }
 }
 
 // So 0° is in line with the fin, positive angles rotate it one way, and negative angles rotate it the other way.
 // TODO: Figure out which direction it's rotated and how that affects PID.
-void set_servo_angle(Servo& servo, const double_t angle_degrees_from_neutral) {
+void set_servo_angle(const ServoID servo, const double_t angle_degrees_from_neutral) {
   constexpr double max_deflection = SERVO_DEGREE_RANGE / 2.0;
   constexpr double neutral_angle = max_deflection; // can calibrate if need be
   const double_t clamped_angle = clamp(angle_degrees_from_neutral, -max_deflection, max_deflection);
   const double_t progress = (clamped_angle + neutral_angle) / SERVO_DEGREE_RANGE; // 0.0 to 1.0
   const int32_t micros_position = calc_servo_micros_position(progress);
-  servo.writeMicroseconds(micros_position);
+  get_servo(servo)->writeMicroseconds(micros_position);
 }
 
-void test_servo(Servo& servo) {
+void test_servo(const ServoID servo) {
   constexpr double_t duration = 2.0; // seconds
   sweep_servo(servo, duration, false);
   sweep_servo(servo, duration, true);
-  servo.write(90); // return to center
+  set_servo_angle(servo, 0); // return to center
 }
 
 void servo_test_loop() {
   // Sweep X+ servo
-  test_servo(servoXPlus);
+  test_servo(SERVO_XPLUS);
   // Sweep X- servo
-  test_servo(servoXMinus);
+  test_servo(SERVO_XMINUS);
   // Sweep Y+ servo
-  test_servo(servoYPlus);
+  test_servo(SERVO_YPLUS);
   // Sweep Y- servo
-  test_servo(servoYMinus);
+  test_servo(SERVO_YMINUS);
 }
