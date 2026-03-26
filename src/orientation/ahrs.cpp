@@ -10,9 +10,13 @@
 // rotate a body-vector v_b into earth frame using quaternion q (body->earth)
 Vec3 rotateBodyToEarth(const Quat& q, const Vec3& v_b) {
   // p = q ⊗ [0,v_b] ⊗ q*
-  const Quat p{0, v_b.x, v_b.y, v_b.z};
-  const Quat t = q * p;
-  const Quat res = t * q.conjugate();
+  const Quat res = q * v_b.toQuat(0) * q.conjugate();
+  return Vec3{res.x, res.y, res.z}; // last 3 are vector part
+}
+
+Vec3 rotateEarthToBody(const Quat& q, const Vec3& v_e) {
+  // p = q* ⊗ [0,v_e] ⊗ q
+  const Quat res = q.conjugate() * v_e.toQuat(0) * q;
   return Vec3{res.x, res.y, res.z}; // last 3 are vector part
 }
 
@@ -42,7 +46,6 @@ Quat deltaQuatFromGyro(const Vec3& omega, const double dt) {
 Quat madgwickCorrectionStep(const Quat& q_pred, // predicted quaternion (gyro-propagated & normalised) -> q2
                             const Vec3& a, // accelerometer (bias-corrected) in body frame (no normalising required; we can normalise inside)
                             const Vec3& m, // magnetometer (bias-corrected & soft-iron corrected) in body frame
-                            const Vec3& gyro,
                             double beta, // algorithm gain (0.0 = no correction, larger faster)
                             double dt) { // time step (s)
 // normalise accelerometer measurement
@@ -80,31 +83,30 @@ Quat madgwickCorrectionStep(const Quat& q_pred, // predicted quaternion (gyro-pr
 
   // Jacobian J (3x4) lines combined into gradient g = J^T * f  (this expands to 4 components, as we need it to build a quaternion)
   // Madgwick 2010 paper's compact expression:
-  Vec3 g_accel_vec;
   const Grad4 grad = {
-    _4q1 * f.z - _2q3 * f.x + _2q2 * f.y,
-    _4q2 * f.z + _2q4 * f.x + _2q1 * f.y - _8q2 * f.z,
-    _4q3 * f.z - _2q1 * f.x + _2q4 * f.y - _8q3 * f.z,
-    _4q4 * f.z + _2q2 * f.x + _2q3 * f.y
+    -_2q3 * f.x + _2q2 * f.y,
+    +_2q4 * f.x + _2q1 * f.y - _4q2 * f.z,
+    -_2q1 * f.x + _2q4 * f.y - _4q3 * f.z,
+    +_2q2 * f.x + _2q3 * f.y
   };
 
   // For magnetometer part we should compute reference direction and its gradient.
   // compute Earth's magnetic field in body frame and gradient.
-  // Compute h = q ⊗ m_n ⊗ q*  (magnetic field in earth/body frame)
+  // Compute h = q ⊗ m_n ⊗ q*  (magnetic field in earth frame)
   const Quat p_m = m_n.toQuat(0);
   const Quat t = q_pred * p_m;
   const Quat hq = t * q_pred.conjugate();
   const Vec3 h{hq.x, hq.y, hq.z};
 
   // Projection of h onto x-y plane of Earth (reference)
-  Vec3 b; // b = [bx, 0, bz] as in Madgwick
+  Vec3 b; // b = [0, bx, 0, bz] as in Madgwick
   b.x = std::sqrt(h.x * h.x + h.y * h.y);
   b.y = 0.0;
   b.z = h.z;
 
   // compute the gradient of magnetometer using a simplified combined gradient:
   // Compute an approximate mag error vector between predicted and measured (in body frame!)
-  const Vec3 m_pred = h; // already in body frame from above calculation
+  const Vec3 m_pred = rotateEarthToBody(q_pred, b); // predicted magnetic field in body frame (reference)
   const Vec3 mag_err = {
     m_pred.x / (m_pred.norm3() + 1e-12) - m_n.x,
     m_pred.y / (m_pred.norm3() + 1e-12) - m_n.y,
@@ -141,19 +143,13 @@ Quat madgwickCorrectionStep(const Quat& q_pred, // predicted quaternion (gyro-pr
       g_combined /= gn2;
   }
 
-  // Compute quaternion rate from gyroscope (already bias-corrected), math is q_dot = 0.5 * q ⊗ [0,ω]
-  const Quat omega_q = gyro.toQuat(0.0);
-  Quat q_dot = q_pred * omega_q;
-  q_dot *= 0.5;
-
-  // Apply gradient descent corrective step scaled by beta: q_dot = q_dot - beta * gradient
-  q_dot.w -= beta * g_combined.w;
-  q_dot.x -= beta * g_combined.x;
-  q_dot.y -= beta * g_combined.y;
-  q_dot.z -= beta * g_combined.z;
-
   // Integrate to get corrected quaternion (Simple Euler integration)
-  Quat q_corr = q_pred + q_dot * dt;
+  Quat q_corr = Quat{
+    q_pred.w - beta * g_combined.w * dt,
+    q_pred.x - beta * g_combined.x * dt,
+    q_pred.y - beta * g_combined.y * dt,
+    q_pred.z - beta * g_combined.z * dt,
+  };
 
   return q_corr;
 }
@@ -205,7 +201,7 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
   q2 = q2.normalized();
 
   // Step 4: Madgwick sensor fusion correction (q3) - fuse with accelerometer and magnetometer
-  const Quat q3 = madgwickCorrectionStep(q2, accel, mag, gyro, state.beta, dt);
+  const Quat q3 = madgwickCorrectionStep(q2, accel, mag, state.beta, dt);
 
   // Step 5: Final normalisation (q4) - ensure valid quaternion
   Quat q4 = q3;
