@@ -42,71 +42,23 @@ Quat deltaQuatFromGyro(const Vec3& omega, const double dt) {
 
 // Madgwick correction step, I dont know how to get the library from adafruit so I just did it manually/mathmatically!
 
-// returns corrected sensor fused quaternion as quaternion q3 (unnormalised)
-Quat madgwickCorrectionStep(const Quat& q_pred, // predicted quaternion (gyro-propagated & normalised) -> q2
-                            const Vec3& a, // accelerometer (bias-corrected) in body frame (no normalising required; we can normalise inside)
-                            const Vec3& m, // magnetometer (bias-corrected & soft-iron corrected) in body frame
-                            double beta, // algorithm gain (0.0 = no correction, larger faster)
-                            double dt) { // time step (s)
-// normalise accelerometer measurement
-  Vec3 a_n = a;
-  const double na = a_n.norm3();
-  if (na < 1e-12)
-    return q_pred; // can't correct without accel
-  a_n /= na;
-
-  // normalise magnetometer measurement
-  Vec3 m_n = m;
-  const double nm = m_n.norm3();
-  if (nm < 1e-12)
-    return q_pred;
-  m_n /= nm;
-
-  const Quat q = q_pred;
-
-  // Reference direction of Earth's magnetic field (in body frame) --- Madgwick derivation uses this.
-  // Compute objective function gradient (following Madgwick 2010 equations, check paper).
-  // For full derivation see Madgwick's report; here we implement the standard gradient step.
-  // variables
-  const double _2q1 = 2.0 * q.w, _2q2 = 2.0 * q.x, _2q3 = 2.0 * q.y, _2q4 = 2.0 * q.z;
-  const double _4q1 = 4.0 * q.w, _4q2 = 4.0 * q.x, _4q3 = 4.0 * q.y;
-  const double _8q2 = 8.0 * q.x, _8q3 = 8.0 * q.y;
-  const double _4q4 = 4.0 * q.z;
-
-  // Gradient of f (accel) part (from Madgwick): need to use specific q# combinations
-  // math behind the values= f = predicted_gravity - measured_gravity; predicted_gravity = [2(q2 q4 - q1 q3), 2(q1 q2 + q3 q4), q1^2 - q2^2 - q3^2 + q4^2]
-  Vec3 f = {
-    2.0 * (q.x * q.z - q.w * q.y) - a_n.x,
-    2.0 * (q.w * q.x + q.y * q.z) - a_n.y,
-    q.w * q.w - q.x * q.x - q.y * q.y + q.z * q.z - a_n.z
-  };
-
-  // Jacobian J (3x4) lines combined into gradient g = J^T * f  (this expands to 4 components, as we need it to build a quaternion)
-  // Madgwick 2010 paper's compact expression:
-  const Grad4 grad = {
-    -_2q3 * f.x + _2q2 * f.y,
-    +_2q4 * f.x + _2q1 * f.y - _4q2 * f.z,
-    -_2q1 * f.x + _2q4 * f.y - _4q3 * f.z,
-    +_2q2 * f.x + _2q3 * f.y
-  };
-
+Grad4 compute_magnetometer_gradient(const Vec3& m_n, const Quat& q) {
   // For magnetometer part we should compute reference direction and its gradient.
   // compute Earth's magnetic field in body frame and gradient.
   // Compute h = q ⊗ m_n ⊗ q*  (magnetic field in earth frame)
-  const Quat p_m = m_n.toQuat(0);
-  const Quat t = q_pred * p_m;
-  const Quat hq = t * q_pred.conjugate();
-  const Vec3 h{hq.x, hq.y, hq.z};
+  const Vec3 h = rotateBodyToEarth(q, m_n);
 
   // Projection of h onto x-y plane of Earth (reference)
-  Vec3 b; // b = [0, bx, 0, bz] as in Madgwick
-  b.x = std::sqrt(h.x * h.x + h.y * h.y);
-  b.y = 0.0;
-  b.z = h.z;
+  // b = [0, bx, 0, bz] as in Madgwick
+  const Vec3 b{
+    std::sqrt(h.x * h.x + h.y * h.y),
+    0.0,
+    h.z
+  };
 
   // compute the gradient of magnetometer using a simplified combined gradient:
   // Compute an approximate mag error vector between predicted and measured (in body frame!)
-  const Vec3 m_pred = rotateEarthToBody(q_pred, b); // predicted magnetic field in body frame (reference)
+  const Vec3 m_pred = rotateEarthToBody(q, b); // predicted magnetic field in body frame (reference)
   const Vec3 mag_err = {
     m_pred.x / (m_pred.norm3() + 1e-12) - m_n.x,
     m_pred.y / (m_pred.norm3() + 1e-12) - m_n.y,
@@ -127,31 +79,75 @@ Quat madgwickCorrectionStep(const Quat& q_pred, // predicted quaternion (gyro-pr
     g_mag_vec.y,
     g_mag_vec.z
   };
+  return magGrad;
+}
+
+Grad4 compute_accelerometer_gradient(const Vec3& a_n, const Quat& q) {
+  // Compute objective function gradient (following Madgwick 2010 equations, check paper).
+  // For full derivation see Madgwick's report; here we implement the standard gradient step.
+  // variables
+  const double _2q1 = 2.0 * q.w, _2q2 = 2.0 * q.x, _2q3 = 2.0 * q.y, _2q4 = 2.0 * q.z;
+  const double _4q2 = 4.0 * q.x, _4q3 = 4.0 * q.y;
+
+  // Gradient of f (accel) part (from Madgwick): need to use specific q# combinations
+  // math behind the values= f = predicted_gravity - measured_gravity; predicted_gravity = [2(q2 q4 - q1 q3), 2(q1 q2 + q3 q4), q1^2 - q2^2 - q3^2 + q4^2]
+  const Vec3 f = {
+    2.0 * (q.x * q.z - q.w * q.y) - a_n.x,
+    2.0 * (q.w * q.x + q.y * q.z) - a_n.y,
+    q.w * q.w - q.x * q.x - q.y * q.y + q.z * q.z - a_n.z
+  };
+
+  // Jacobian J (3x4) lines combined into gradient g = J^T * f  (this expands to 4 components, as we need it to build a quaternion)
+  // Madgwick 2010 paper's compact expression:
+  const Grad4 accelGrad = {
+    -_2q3 * f.x + _2q2 * f.y,
+    +_2q4 * f.x + _2q1 * f.y - _4q2 * f.z,
+    -_2q1 * f.x + _2q4 * f.y - _4q3 * f.z,
+    +_2q2 * f.x + _2q3 * f.y
+  };
+  return accelGrad;
+}
+
+// returns corrected sensor fused quaternion as quaternion q3 (unnormalized)
+Quat madgwickCorrectionStep(const Quat& q_pred, // predicted quaternion (gyro-propagated & normalized) -> q2
+                            const Vec3& a, // accelerometer (bias-corrected) in body frame (no normalizing required; we can normalize inside)
+                            const Vec3& m, // magnetometer (bias-corrected & soft-iron corrected) in body frame
+                            const double beta, // algorithm gain (0.0 = no correction, larger faster)
+                            const double dt) { // time step (s)
+  const Quat q = q_pred;
+
+  const double nm = m.norm3();
+  Grad4 magGrad = {0, 0, 0, 0};
+  // Skip magnetometer correction if the measurement is too small
+  if (nm >= 1e-12) {
+    const Vec3 m_n = m / nm; // normalized magnetometer measurement
+    magGrad = compute_magnetometer_gradient(m_n, q);
+  }
+
+  const double na = a.norm3();
+  Grad4 accelGrad = {0, 0, 0, 0};
+  // Skip gravity-based accelerometer correction if the measurement doesn't seem like gravity (like during burn or coast)
+  if (na >= 0.5 * G && na <= 2.0 * G) {
+    const Vec3 a_n = a / na; // normalized accelerometer measurement
+    accelGrad = compute_accelerometer_gradient(a_n, q);
+  }
 
   // Combine gradients (accel-heavy + mag small contribution)
-  Grad4 g_combined = magGrad + grad;
+  Grad4 g_combined = magGrad + accelGrad;
 
-  // Normalise gradient
+  // Normalize gradient
   const double gn = g_combined.norm();
   if (gn > 0.0) {
     g_combined /= gn;
-  } else {
-    // if mag fails
-    g_combined = grad;
-    double gn2 = g_combined.norm();
-    if (gn2 > 0)
-      g_combined /= gn2;
   }
 
   // Integrate to get corrected quaternion (Simple Euler integration)
-  Quat q_corr = Quat{
+  return Quat{
     q_pred.w - beta * g_combined.w * dt,
     q_pred.x - beta * g_combined.x * dt,
     q_pred.y - beta * g_combined.y * dt,
     q_pred.z - beta * g_combined.z * dt,
   };
-
-  return q_corr;
 }
 
 // Bias computation (mean across samples)
@@ -184,7 +180,7 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
   const double dt = (now_micros - state.lastUpdate) / 1000000.0;
   state.lastUpdate = now_micros;
 
-  if (dt <= 0) {
+  if (dt <= 0 || dt > 0.1) { // usually like .005s, so if it's far greater, skip so we don't get huge jumps in orientation from bad timing
     return; // Invalid time step, skip update
   }
 
@@ -196,14 +192,14 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
   const Quat delta_q = deltaQuatFromGyro(gyro, dt);
   const Quat q1 = q0 * delta_q;
 
-  // Step 3: Normalise (q2) - maintain quaternion unit length
+  // Step 3: Normalize (q2) - maintain quaternion unit length
   Quat q2 = q1;
   q2 = q2.normalized();
 
   // Step 4: Madgwick sensor fusion correction (q3) - fuse with accelerometer and magnetometer
   const Quat q3 = madgwickCorrectionStep(q2, accel, mag, state.beta, dt);
 
-  // Step 5: Final normalisation (q4) - ensure valid quaternion
+  // Step 5: Final normalization (q4) - ensure valid quaternion
   Quat q4 = q3;
   q4 = q4.normalized();
 
