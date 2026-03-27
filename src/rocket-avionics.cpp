@@ -5,10 +5,19 @@
 #include "output/servo.h"
 void setup() {
   init_servos();
+  Serial.begin(115200);
 }
 
 void loop() {
   servo_test_loop();
+  // read angle from serial input and set servo to that angle
+  // if (Serial.available() > 0) {
+  //   String input = Serial.readStringUntil('\n');
+  //   double angle = input.toDouble();
+  //   Serial.print("Setting servo angle to: ");
+  //   Serial.println(angle);
+  //   set_servo_angle(SERVO_XMINUS, angle);
+  // }
 }
 #else // !SERVO_TESTING
 #include <Wire.h>

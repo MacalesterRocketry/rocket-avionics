@@ -43,7 +43,7 @@
 // Beta constants indicate how much to trust the different sensor corrections.
 // Higher beta means more trust in that sensor and faster convergence, but also more susceptibility to noise.
 #define AHRS_ACC_BETA (0.1) // accelerometer beta constant for Madgwick filter
-#define AHRS_MAG_BETA (0.01) // magnetometer beta constant for Madgwick filter
+#define AHRS_MAG_BETA (0.0) // magnetometer beta constant for Madgwick filter
 
 // PID constants
 #define MOMENT_OF_INERTIA 0.00685 // MoI in kg m²
@@ -53,7 +53,10 @@
 
 // Thresholds
 #define LAUNCH_ACCEL_THRESHOLD_G 4.0
-#define SERVO_DEGREE_RANGE 100.0 // degrees of the physical servo. For example, our smaller servo does 100°, and our larger one does 180°.
+#define SERVO_DEGREE_RANGE 100.0 // degrees of the physical servo. For example, our smaller servo does 100°
+#define SERVO_MAX_ANGLE 50.0 // degrees, maximum angle the servo can move to when in the fin
+#define SERVO_MIN_ANGLE (-50.0) // degrees, minimum angle the servo can move to when in the fin
+#define SERVO_NEUTRAL_ANGLE (-7.0) // degrees, the angle at which the servo is neutral (pointing straight back)
 #define SERVO_MICROS_MIN 1000 // microseconds
 #define SERVO_MICROS_MAX 2000 // microseconds
 #define SERVO_MAX_TORQUE 0.51 // Nm, according to datasheet (5.2 Kgf cm at 7.4V, which is 0.51 Nm)
@@ -83,6 +86,8 @@
 #define SERVO_YMINUS_PIN 8
 
 #define BATTERY_VOLTAGE_PIN A3
+#define BATTERY_VOLTAGE_R1 100000.0 // 100kOhm voltage divider resistors for the battery voltage measurements
+#define BATTERY_VOLTAGE_R2 100000.0
 
 #elif HARDWARE_VERSION == 1
 #define SD_CS_PIN 23

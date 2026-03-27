@@ -69,7 +69,7 @@ void init_servos() {
 void set_servo_angle(const ServoID servo, const double_t angle_degrees_from_neutral) {
   constexpr double max_deflection = SERVO_DEGREE_RANGE / 2.0;
   constexpr double neutral_angle = max_deflection; // can calibrate if need be
-  const double_t clamped_angle = clamp(angle_degrees_from_neutral, -max_deflection, max_deflection);
+  const double_t clamped_angle = clamp(angle_degrees_from_neutral, SERVO_MIN_ANGLE, SERVO_MAX_ANGLE) + SERVO_NEUTRAL_ANGLE;
   const double_t progress = (clamped_angle + neutral_angle) / SERVO_DEGREE_RANGE; // 0.0 to 1.0
   const int32_t micros_position = calc_servo_micros_position(progress);
   get_servo(servo)->writeMicroseconds(micros_position);
