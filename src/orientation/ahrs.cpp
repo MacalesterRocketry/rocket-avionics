@@ -133,7 +133,8 @@ Quat madgwickCorrectionStep(const Quat& q_pred, // predicted quaternion (gyro-pr
   }
 
   // Combine gradients (accel-heavy + mag small contribution)
-  Grad4 g_combined = magGrad + accelGrad;
+  // Grad4 g_combined = magGrad + accelGrad;
+  Grad4 g_combined = accelGrad;
 
   // Normalize gradient
   const double gn = g_combined.norm();
@@ -212,7 +213,7 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
   const Vec3 earthGyro = rotateBodyToEarth(q4, gyro);
   const Vec3 earthMag = rotateBodyToEarth(q4, mag);
 
-  state.acceleration = earthAccel;
+  state.acceleration = earthAccel - Vec3{0, 0, G}; // Subtract gravity to get linear acceleration in earth frame
   state.velocity += earthAccel * dt;
   state.position += state.velocity * dt;
 

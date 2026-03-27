@@ -35,6 +35,9 @@
 #define GYRO_BIAS_X (-0.01)
 #define GYRO_BIAS_Y (0.0)
 #define GYRO_BIAS_Z (0.0)
+// #define GYRO_BIAS_X (0.029822) // TODO: test
+// #define GYRO_BIAS_Y (-0.003555)
+// #define GYRO_BIAS_Z (0.028698)
 
 #define MOMENT_OF_INERTIA 0.00685 // MoI in kg m²
 #define ROLL_PID_Kp 0.4 // proportional constant
