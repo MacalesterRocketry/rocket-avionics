@@ -261,16 +261,16 @@ void zero_pos_vel() {
   state.velocity = {0, 0, 0};
 }
 
-Rad calculate_roll_rad(const Quat& q) {
+Rad calculate_pitch_rad(const Quat& q) {
   return atan2(2.0 * (q.w * q.x + q.y * q.z),
                1.0 - 2.0 * (q.x * q.x + q.y * q.y));
 }
 
-Rad calculate_pitch_rad(const Quat& q) {
+Rad calculate_yaw_rad(const Quat& q) {
   return asin(2.0 * (q.w * q.y - q.z * q.x));
 }
 
-Rad calculate_yaw_rad(const Quat& q) {
+Rad calculate_roll_rad(const Quat& q) {
   return atan2(2.0 * (q.w * q.z + q.x * q.y),
                1.0 - 2.0 * (q.y * q.y + q.z * q.z));
 }
@@ -287,17 +287,17 @@ Deg calculate_yaw_deg(const Quat& q) {
   return radToDeg(calculate_yaw_rad(q));
 }
 
-Quat roll_deg_to_quat(const Deg roll) {
+Quat yaw_deg_to_quat(const Deg roll) {
   const double roll_rad = degToRad(roll);
   return axisAngleToQuat({1, 0, 0}, roll_rad);
 }
 
-Quat yaw_deg_to_quat(const Deg yaw) {
+Quat pitch_deg_to_quat(const Deg yaw) {
   const double yaw_rad = degToRad(yaw);
   return axisAngleToQuat({0, 0, 1}, yaw_rad);
 }
 
-Quat pitch_deg_to_quat(const Deg pitch) {
+Quat roll_deg_to_quat(const Deg pitch) {
   const double pitch_rad = degToRad(pitch);
   return axisAngleToQuat({0, 1, 0}, pitch_rad);
 }

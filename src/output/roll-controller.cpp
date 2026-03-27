@@ -23,15 +23,16 @@ Deg calculate_deflection_pid(const Quat& qtarget, const double dt) {
   Quat qrollerror = (qcurrent.conjugate() * qtarget).normalized();
 
   // Convert to angular error
-  double eroll_x = 2 * qrollerror.x;        // X-component = roll error
+  double eroll_y = 2 * qrollerror.y; // Y-component = roll error TODO: Are we sure it's that? I would have assumed it would need to be Euler before we can assume y is roll.
+  double eroll_y_test = calculate_roll_deg(qrollerror);
 
   // TORQUE PID CALCULATION
 
   // PID terms
-  const double ang_accel_p = ROLL_PID_Kp * eroll_x;
-  integral += eroll_x * dt;
+  const double ang_accel_p = ROLL_PID_Kp * eroll_y;
+  integral += eroll_y * dt;
   const double ang_accel_i = ROLL_PID_Ki * integral;
-  const double ang_accel_d = -ROLL_PID_Kd * get_angular_velocity().x; // TODO: Is x the right axis?
+  const double ang_accel_d = -ROLL_PID_Kd * get_angular_velocity().y;
 
   // Total desired angular acceleration
   const double ang_accel_desired = ang_accel_p + ang_accel_i + ang_accel_d;
