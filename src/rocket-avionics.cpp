@@ -1,4 +1,5 @@
 #include "config.h"
+#include "orientation/ahrs.h"
 
 #if SERVO_TESTING
 #include "output/servo.h"
@@ -53,6 +54,10 @@ void setup() {
   init_servos();
 #if DEBUG
   Serial.println("Servos initialized.");
+#endif
+  start_ahrs();
+#if DEBUG
+  Serial.println("AHRS started.");
 #endif
 
   setState(STATE_READY_TO_LAUNCH);

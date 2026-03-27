@@ -3,13 +3,15 @@
 
 #include "utils.h"
 
-void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag);
+void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag, bool in_flight);
 void start_ahrs();
 Quat get_orientation();
 Vec3 get_acceleration();
 Vec3 get_velocity();
 Vec3 get_position();
 Vec3 get_angular_velocity();
+
+void zero_pos_vel();
 
 Rad calculate_roll_rad(const Quat& q);
 Rad calculate_pitch_rad(const Quat& q);

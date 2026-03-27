@@ -110,31 +110,28 @@ Grad4 compute_accelerometer_gradient(const Vec3& a_n, const Quat& q) {
 
 // returns corrected sensor fused quaternion as quaternion q3 (unnormalized)
 Quat madgwickCorrectionStep(const Quat& q_pred, // predicted quaternion (gyro-propagated & normalized) -> q2
-                            const Vec3& a, // accelerometer (bias-corrected) in body frame (no normalizing required; we can normalize inside)
-                            const Vec3& m, // magnetometer (bias-corrected & soft-iron corrected) in body frame
-                            const double beta, // algorithm gain (0.0 = no correction, larger faster)
+                            const Vec3& acc, // accelerometer (bias-corrected) in body frame (no normalizing required; we can normalize inside)
+                            const Vec3& mag, // magnetometer (bias-corrected & soft-iron corrected) in body frame
                             const double dt) { // time step (s)
   const Quat q = q_pred;
 
-  const double nm = m.norm3();
+  const double nm = mag.norm3();
   Grad4 magGrad = {0, 0, 0, 0};
   // Skip magnetometer correction if the measurement is too small
   if (nm >= 1e-12) {
-    const Vec3 m_n = m / nm; // normalized magnetometer measurement
+    const Vec3 m_n = mag / nm; // normalized magnetometer measurement
     magGrad = compute_magnetometer_gradient(m_n, q);
   }
 
-  const double na = a.norm3();
+  const double na = acc.norm3();
   Grad4 accelGrad = {0, 0, 0, 0};
   // Skip gravity-based accelerometer correction if the measurement doesn't seem like gravity (like during burn or coast)
   if (na >= 0.5 * G && na <= 2.0 * G) {
-    const Vec3 a_n = a / na; // normalized accelerometer measurement
+    const Vec3 a_n = acc / na; // normalized accelerometer measurement
     accelGrad = compute_accelerometer_gradient(a_n, q);
   }
 
-  // Combine gradients (accel-heavy + mag small contribution)
-  // Grad4 g_combined = magGrad + accelGrad;
-  Grad4 g_combined = accelGrad;
+  Grad4 g_combined = accelGrad * AHRS_ACC_BETA + magGrad * AHRS_MAG_BETA;
 
   // Normalize gradient
   const double gn = g_combined.norm();
@@ -143,12 +140,7 @@ Quat madgwickCorrectionStep(const Quat& q_pred, // predicted quaternion (gyro-pr
   }
 
   // Integrate to get corrected quaternion (Simple Euler integration)
-  return Quat{
-    q_pred.w - beta * g_combined.w * dt,
-    q_pred.x - beta * g_combined.x * dt,
-    q_pred.y - beta * g_combined.y * dt,
-    q_pred.z - beta * g_combined.z * dt,
-  };
+  return q_pred - g_combined * dt;
 }
 
 // Bias computation (mean across samples)
@@ -166,7 +158,6 @@ Vec3 computeBiasMean(const std::vector<Vec3>& samples) {
 // AHRS Current State
 struct AHRSState {
   Quat q = {1.0, 0.0, 0.0, 0.0}; // Current orientation quaternion
-  double beta = 0.1; // Madgwick filter gain
   uint64_t lastUpdate = 0;
   Vec3 acceleration = {0, 0, 0};
   Vec3 velocity = {0, 0, 0};
@@ -175,7 +166,7 @@ struct AHRSState {
 };
 static AHRSState state;
 
-void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
+void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag, const bool in_flight) {
   // Used to Calculate delta time
   const uint64_t now_micros = micros64();
   const double dt = (now_micros - state.lastUpdate) / 1000000.0;
@@ -194,15 +185,14 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag) {
   const Quat q1 = q0 * delta_q;
 
   // Step 3: Normalize (q2) - maintain quaternion unit length
-  Quat q2 = q1;
-  q2 = q2.normalized();
+  const Quat q2 = q1.normalized();
 
   // Step 4: Madgwick sensor fusion correction (q3) - fuse with accelerometer and magnetometer
-  const Quat q3 = madgwickCorrectionStep(q2, accel, mag, state.beta, dt);
+  // In flight, we just follow the gyroscope. Gravity doesn't affect it, so we need to ignore the accelerometer, and the magnetometer is unreliable.
+  const Quat q3 = in_flight ? q2 : madgwickCorrectionStep(q2, accel, mag, dt);
 
   // Step 5: Final normalization (q4) - ensure valid quaternion
-  Quat q4 = q3;
-  q4 = q4.normalized();
+  const Quat q4 = q3.normalized();
 
   // Update state with final quaternion, final state
   state.q = q4;
@@ -264,6 +254,11 @@ Vec3 get_position() {
 }
 Vec3 get_angular_velocity() {
   return state.angular_velocity;
+}
+
+void zero_pos_vel() {
+  state.position = {0, 0, 0};
+  state.velocity = {0, 0, 0};
 }
 
 Rad calculate_roll_rad(const Quat& q) {

@@ -89,18 +89,22 @@ struct Vec4Base {
     return derived();
   }
 
-  Derived operator+(const Vec4Base &q) const {
+  template<typename OtherDerived>
+  Derived operator+(const Vec4Base<T, OtherDerived> &q) const {
     return Derived{ w+q.w, x+q.x, y+q.y, z+q.z };
   }
-  Derived& operator+=(const Vec4Base &q) {
+  template<typename OtherDerived>
+  Derived& operator+=(const Vec4Base<T, OtherDerived> &q) {
     w += q.w; x += q.x; y += q.y; z += q.z;
     return derived();
   }
 
-  Derived operator-(const Vec4Base &q) const {
+  template<typename OtherDerived>
+  Derived operator-(const Vec4Base<T, OtherDerived> &q) const {
     return Derived{ w-q.w, x-q.x, y-q.y, z-q.z };
   }
-  Derived& operator-=(const Vec4Base &q) {
+  template<typename OtherDerived>
+  Derived& operator-=(const Vec4Base<T, OtherDerived> &q) {
     w -= q.w; x -= q.x; y -= q.y; z -= q.z;
     return derived();
   }

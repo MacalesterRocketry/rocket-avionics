@@ -39,6 +39,13 @@
 // #define GYRO_BIAS_Y (-0.003555)
 // #define GYRO_BIAS_Z (0.028698)
 
+// AHRS Constants
+// Beta constants indicate how much to trust the different sensor corrections.
+// Higher beta means more trust in that sensor and faster convergence, but also more susceptibility to noise.
+#define AHRS_ACC_BETA (0.1) // accelerometer beta constant for Madgwick filter
+#define AHRS_MAG_BETA (0.01) // magnetometer beta constant for Madgwick filter
+
+// PID constants
 #define MOMENT_OF_INERTIA 0.00685 // MoI in kg m²
 #define ROLL_PID_Kp 0.4 // proportional constant
 #define ROLL_PID_Ki 1 // integral constant

@@ -106,14 +106,17 @@ void handleState() { // operations and transition functions
       // Only true when using interrupts, which we're not right now, but I'm leaving it.
       if (hasLaunched()) {
         logEvent(systemState, STATE_ASCENT, EVENT_LAUNCH_DETECTED);
-        start_ahrs();
 #if DEBUG
         Serial.println("Launch detected!");
 #endif
         return setState(STATE_ASCENT);
       }
 
-      getSensorData();
+      const SensorReadings sensorData = getSensorData();
+      update_ahrs(sensorData.lsm.gyro, sensorData.lsm.accel, sensorData.lis3.mag, false);
+      logAHRS(get_orientation(), get_acceleration(), get_velocity(), get_position());
+      zero_pos_vel(); // On the ground, it's expected to be stationary, so we can zero our position and velocity estimates to correct for any drift during pre-launch.
+      // TODO: Is that actually a good idea?
       break;
     }
     case STATE_ASCENT: {
@@ -122,7 +125,7 @@ void handleState() { // operations and transition functions
       if (accel.mag() >= ACCELEROMETER_SWITCH_THRESHOLD) { // If the low-G accelerometer is saturated, switch to high-G readings for AHRS
         accel = sensorData.adxl.highg_accel;
       }
-      update_ahrs(sensorData.lsm.gyro, accel, sensorData.lis3.mag);
+      update_ahrs(sensorData.lsm.gyro, accel, sensorData.lis3.mag, true);
       logAHRS(get_orientation(), get_acceleration(), get_velocity(), get_position());
 
       // Actuate roll control surfaces based on current orientation and target angle
