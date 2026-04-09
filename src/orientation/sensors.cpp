@@ -103,6 +103,7 @@ void initSensors() {
   initMagnetometer();
   initHighGAccelerometer();
   initBarometer();
+  pinMode(BATTERY_VOLTAGE_PIN, INPUT);
 
 #if DEBUG
   Serial.println("ADXL375 details:");
@@ -175,6 +176,13 @@ BMPReading readBMP() {
     .temperature = bmp.temperature,
     .altitude = bmp_altitude
   };
+}
+
+double readBatteryVoltage() {
+  // Note: This is a very rough estimate and should be calibrated for accuracy
+  const int raw = analogRead(BATTERY_VOLTAGE_PIN);
+  const double voltage = (3.3 / 4095.0) * (raw * BATTERY_VOLTAGE_R2 / (BATTERY_VOLTAGE_R1 + BATTERY_VOLTAGE_R2));
+  return voltage;
 }
 
 SensorReadings readSensors() {

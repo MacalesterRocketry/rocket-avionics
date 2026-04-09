@@ -129,7 +129,7 @@ with open(f"{sdcard_path}{logFile}", 'rb') as f:
             })
 
         elif pkt_type == PacketType.AHRS.value:
-            data = struct.unpack(endianPrefix + 'ffffffffff', f.read(52))
+            data = struct.unpack(endianPrefix + 'fffffffffffff', f.read(52))
             row.update({
                 'qW': data[0], 'qX': data[1], 'qY': data[2], 'qZ': data[3],
                 'accX_earth': data[4], 'accY_earth': data[5], 'accZ_earth': data[6],
@@ -145,13 +145,13 @@ with open(f"{sdcard_path}{logFile}", 'rb') as f:
 df = pd.DataFrame(data_list)
 
 # add micros delta column (time between readings)
-# df['micros_delta'] = df['micros'].diff().fillna(0)
-# # print average micros delta
-# avg_micros_delta = df['micros_delta'].mean()
-# print(f"Average micros delta: {avg_micros_delta}")
+df['micros_delta'] = df['micros'].diff().fillna(0)
+# print average micros delta
+avg_micros_delta = df['micros_delta'].mean()
+print(f"Average micros delta: {avg_micros_delta}")
 # # max micros delta
-# max_micros_delta = df['micros_delta'].max()
-# print(f"Max micros delta: {max_micros_delta}")
-#
+max_micros_delta = df['micros_delta'].max()
+print(f"Max micros delta: {max_micros_delta}")
+
 print(df.head(8))
-# df.to_csv("flight_data.csv", index=False) # Save as CSV if needed
+df.to_csv("flight_data.csv", index=False) # Save as CSV if needed
