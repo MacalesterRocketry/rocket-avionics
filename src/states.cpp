@@ -18,11 +18,20 @@ bool buzzerOn = false;
 
 SystemState systemState;
 
+uint64_t ignitionTime = 0;
+
+bool leftTurnSignalPinOn = false;
+bool rightTurnSignalPinOn = false;
+
 void initIndicators() {
   pixel.begin();
   pixel.setBrightness(30);
   pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW);
+  digitalWriteFast(BUZZER_PIN, LOW);
+#if USE_TURN_SIGNALS
+  pinMode(TURN_SIGNAL_LEFT_PIN, OUTPUT);
+  pinMode(TURN_SIGNAL_RIGHT_PIN, OUTPUT);
+#endif
 }
 
 void wait(const int milliseconds) {
@@ -86,6 +95,68 @@ void indicateState(SystemState state) {
   pixel.show();
 }
 
+void signalLeftTurn() {
+  // multiplexed, so left is TURN_SIGNAL_LEFT_PIN HIGH and TURN_SIGNAL_RIGHT_PIN LOW
+  if (!leftTurnSignalPinOn) {
+    leftTurnSignalPinOn = true;
+    digitalWriteFast(TURN_SIGNAL_LEFT_PIN, HIGH);
+  }
+  if (rightTurnSignalPinOn) {
+    rightTurnSignalPinOn = false;
+    digitalWriteFast(TURN_SIGNAL_RIGHT_PIN, LOW);
+  }
+}
+
+void signalRightTurn() {
+  // multiplexed, so right is TURN_SIGNAL_RIGHT_PIN HIGH and TURN_SIGNAL_LEFT_PIN LOW
+  if (!rightTurnSignalPinOn) {
+    rightTurnSignalPinOn = true;
+    digitalWriteFast(TURN_SIGNAL_RIGHT_PIN, HIGH);
+  }
+  if (leftTurnSignalPinOn) {
+    leftTurnSignalPinOn = false;
+    digitalWriteFast(TURN_SIGNAL_LEFT_PIN, LOW);
+  }
+}
+
+void clearTurnSignal() {
+  if (leftTurnSignalPinOn) {
+    leftTurnSignalPinOn = false;
+    digitalWriteFast(TURN_SIGNAL_LEFT_PIN, LOW);
+  }
+  if (rightTurnSignalPinOn) {
+    rightTurnSignalPinOn = false;
+    digitalWriteFast(TURN_SIGNAL_RIGHT_PIN, LOW);
+  }
+}
+
+Deg rollProgram() {
+  const double timeInFlight = (micros64() - ignitionTime) / 1000000.0;
+  // at 2 seconds, roll 90°, then at 4 seconds roll back to 0°, then at 6 seconds roll -90°, then at 8 seconds roll back to 0°
+  if (timeInFlight < 2) {
+#if USE_TURN_SIGNALS
+    clearTurnSignal();
+#endif
+    return 0.0;
+  }
+  if (timeInFlight < 4) {
+#if USE_TURN_SIGNALS
+    signalRightTurn();
+#endif
+    return 90.0;
+  }
+  if (timeInFlight < 6) {
+#if USE_TURN_SIGNALS
+    signalLeftTurn();
+#endif
+    return -90.0;
+  }
+#if USE_TURN_SIGNALS
+  clearTurnSignal();
+#endif
+  return 0.0;
+}
+
 void handleState() { // operations and transition functions
   indicateState(systemState);
 
@@ -105,6 +176,7 @@ void handleState() { // operations and transition functions
       // Both functions clear any high-G interrupts, but hasLaunched needs to read them first
       // Only true when using interrupts, which we're not right now, but I'm leaving it.
       if (hasLaunched()) {
+        ignitionTime = micros64();
         logEvent(systemState, STATE_ASCENT, EVENT_LAUNCH_DETECTED);
 #if DEBUG
         Serial.println("Launch detected!");
@@ -130,7 +202,7 @@ void handleState() { // operations and transition functions
 
       // Actuate roll control surfaces based on current orientation and target angle
       static const Quat base_orientation = get_orientation(); // Set the base orientation at launch
-      update_roll(0, base_orientation); // TODO: Target angle should be based on a flight plan, not just 0
+      update_roll(rollProgram(), base_orientation);
 
       // TODO: Transition function should probably be some threshold for chute deploy
       //  bar+gyro+acc all crazy within 0.1s of each other?
@@ -174,11 +246,11 @@ void setState(const SystemState state) {
 void runBuzzer(float secondsDuration, float secondsBetween) {
   if (!buzzerOn && millis() - lastTimeBuzzerChanged > secondsBetween * 1000) {
     lastTimeBuzzerChanged = millis();
-    digitalWrite(BUZZER_PIN, HIGH);
+    digitalWriteFast(BUZZER_PIN, HIGH);
     buzzerOn = true;
   } else if (buzzerOn && millis() - lastTimeBuzzerChanged > secondsDuration * 1000) {
     lastTimeBuzzerChanged = millis();
-    digitalWrite(BUZZER_PIN, LOW);
+    digitalWriteFast(BUZZER_PIN, LOW);
     buzzerOn = false;
   }
 }
