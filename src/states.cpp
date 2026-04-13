@@ -145,20 +145,20 @@ void clearTurnSignal() {
 
 Deg rollProgram() {
   const double timeInFlight = (micros64() - ignitionTime) / 1000000.0;
-  // at 2 seconds, roll 90°, then at 4 seconds roll back to 0°, then at 6 seconds roll -90°, then at 8 seconds roll back to 0°
-  if (timeInFlight < 2) {
+  // at 2 seconds, roll 90°, then at 4 seconds roll to -90°, then at 6 seconds roll back to 0°
+  if (timeInFlight >= 0 && timeInFlight < 2) {
 #if USE_TURN_SIGNALS
     clearTurnSignal();
 #endif
     return 0.0;
   }
-  if (timeInFlight < 4) {
+  if (timeInFlight >= 2 && timeInFlight < 4) {
 #if USE_TURN_SIGNALS
     signalRightTurn();
 #endif
     return 90.0;
   }
-  if (timeInFlight < 6) {
+  if (timeInFlight >= 4 && timeInFlight < 6) {
 #if USE_TURN_SIGNALS
     signalLeftTurn();
 #endif
