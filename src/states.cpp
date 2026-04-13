@@ -69,6 +69,17 @@ void indicateState(SystemState state) {
       break;
     }
     case STATE_ASCENT: {
+      // purple and long beeps
+      pixel.setPixelColor(0, pixel.Color(255, 0, 255));
+#if USE_GPS
+      if (hasGPSFix()) {
+        runBuzzer(1, 16);
+      } else {
+        runBuzzer(1, 8);
+      }
+#else
+      runBuzzer(1, 16);
+#endif
       break;
     }
     case STATE_FILE_CLOSED: {
@@ -91,6 +102,8 @@ void indicateState(SystemState state) {
       runBuzzer(0.1, 0.1);
       break;
     }
+    case STATE_IRRELEVANT:
+      break;
   }
   pixel.show();
 }
