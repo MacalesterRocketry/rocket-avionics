@@ -13,7 +13,7 @@
 
 Adafruit_NeoPixel pixel = Adafruit_NeoPixel(1, NEOPIXEL_PIN);
 
-unsigned long lastTimeBuzzerChanged = 0;
+uint32_t lastTimeBuzzerChanged = 0;
 bool buzzerOn = false;
 
 SystemState systemState;

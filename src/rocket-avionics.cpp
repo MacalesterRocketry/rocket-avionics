@@ -31,6 +31,12 @@ void loop() {
 #include "output/sdcard.h"
 #include "output/servo.h"
 
+#if PROFILING
+uint64_t durationList[PROFILING_SAMPLES];
+uint16_t durationIndex = 0;
+uint64_t previous_micros = 0;
+#endif
+
 void setup() {
   setState(STATE_STARTING);
   initIndicators();
@@ -74,5 +80,41 @@ void setup() {
 
 void loop() {
   handleState();
+
+#if PROFILING
+  if (previous_micros != 0) {
+    durationList[durationIndex] = micros64() - previous_micros;
+    durationIndex = (durationIndex + 1) % PROFILING_SAMPLES;
+  }
+
+  if (durationIndex == 0) { // Print average duration every PROFILING_SAMPLES iterations
+    uint64_t totalDuration = 0;
+    uint64_t maxDuration = 0;
+    uint64_t minDuration = UINT64_MAX;
+    for (const uint16_t duration : durationList) {
+      totalDuration += duration;
+      if (duration > maxDuration) {
+        maxDuration = duration;
+      }
+      if (duration < minDuration) {
+        minDuration = duration;
+      }
+    }
+    const uint64_t averageDuration = totalDuration / PROFILING_SAMPLES;
+    Serial.print("Average loop duration over last ");
+    Serial.print(PROFILING_SAMPLES);
+    Serial.print(" samples: ");
+    Serial.print(averageDuration);
+    Serial.println(" microseconds");
+    Serial.print("Max loop duration: ");
+    Serial.print(maxDuration);
+    Serial.println(" microseconds");
+    Serial.print("Min loop duration: ");
+    Serial.print(minDuration);
+    Serial.println(" microseconds");
+    Serial.println("==========================");
+  }
+  previous_micros = micros64();
+#endif
 }
-#endif // SERVO_TESTING
+#endif
