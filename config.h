@@ -1,17 +1,16 @@
 #pragma once
 
-// TODO: Sometimes the servos move only every 5 seconds; troubleshoot
-// TODO: Sometimes the launch detection doesn't respond; troubleshoot
+// TODO: On some boots, the loop is extremely slow (like 5 seconds), resulting in failures of launch detection and servo movement. Troubleshoot this.
 
 #define DEBUG 0
 #define DEBUG_PRINT_SENSORS 0
-#define DEBUG_PRINT_ORIENTATION 1
+#define DEBUG_PRINT_ORIENTATION 0
 #define DEBUG_PRINT_ROLL_CONTROL 0
 
 #define PID_TUNING 0
 #define SERVO_TESTING 0
 
-#define PROFILING 1
+#define PROFILING 0
 #define PROFILING_SAMPLES 100
 
 #define SYNC_INTERVAL_MS 5000

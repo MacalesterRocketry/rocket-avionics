@@ -4,6 +4,7 @@
 #include "orientation/ahrs.h"
 #include "output/servo.h"
 #include "utils.h"
+#include "output/sdcard.h"
 
 // Effectiveness is the slope of the deflection vs torque curve at zero deflection, which is what we want for the linear approximation. We can adjust it later if we want to get fancy and account for nonlinearity at higher deflections.
 // Using deflection in degrees, so effectiveness is in Nm/deg
@@ -13,18 +14,18 @@ double calculate_effectiveness(const Vec3 &velocity) {
 
 Deg calculate_deflection_pid(const Quat& qtarget, const double dt) {
   static double integral = 0;
-  Quat qcurrent = get_orientation();
+  const Quat qcurrent = get_orientation();
 
   // ============================================
   // ERROR CALCULATION
   // ============================================
 
   // Compute quaternion error
-  Quat qrollerror = (qcurrent.conjugate() * qtarget).normalized();
+  const Quat qrollerror = (qcurrent.conjugate() * qtarget).normalized();
 
   // Convert to angular error
-  double eroll_y = 2 * qrollerror.y; // Y-component = roll error TODO: Are we sure it's that? I would have assumed it would need to be Euler before we can assume y is roll.
-  double eroll_y_test = calculate_roll_deg(qrollerror);
+  const double eroll_y = 2 * qrollerror.y; // Y-component = roll error TODO: Are we sure it's that? I would have assumed it would need to be Euler before we can assume y is roll.
+  // double eroll_y_test = calculate_roll_deg(qrollerror);
 
   // TORQUE PID CALCULATION
 
@@ -67,6 +68,7 @@ void update_roll(const Deg target_angle, const Quat& base_orientation) {
     const uint64_t now_micros = micros64();
     const double dt = (now_micros - last_time) / 1000000.0;
     const double fin_deflection_angle = calculate_deflection_pid(qtarget, dt);
+    logRollControl(target_angle, current_angle, fin_deflection_angle);
 #if DEBUG and DEBUG_PRINT_ROLL_CONTROL
     Serial.print("Target Roll: ");
     Serial.print(target_angle);

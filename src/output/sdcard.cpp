@@ -135,7 +135,7 @@ void logEvent(const SystemState oldState, const SystemState newState, const Even
   const PayloadEvent data = {oldState, newState, reason};
   logPacket(PACKET_EVENT, &data, sizeof(data));
 
-  // TODO: Maybe not? AHRS needs all the performance it can get right at ignition. Maybe put it on another core?
+  //  TODO: Maybe not? AHRS needs all the performance it can get right at ignition. Maybe put it on another core?
   // dataFile.sync();
 }
 
@@ -167,4 +167,9 @@ void logDatetime(const uint16_t year, const uint8_t month, const uint8_t day,
                  const uint8_t hours, const uint8_t minutes, const uint8_t seconds) {
   const PayloadDatetime data = {year, month, day, hours, minutes, seconds};
   logPacket(PACKET_DATETIME, &data, sizeof(data));
+}
+
+void logRollControl(const float targetAngle, const float currentAngle, const float finDeflection) {
+  const PayloadRollControl data = {targetAngle, currentAngle, finDeflection};
+  logPacket(PACKET_CONTROL, &data, sizeof(data));
 }

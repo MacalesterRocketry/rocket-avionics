@@ -120,6 +120,7 @@ void signalLeftTurn() {
   }
 }
 
+// TODO: Move this all to roll-controller.cpp so we can notify about desired movement, rather than desired orientation
 void signalRightTurn() {
   // multiplexed, so right is TURN_SIGNAL_RIGHT_PIN HIGH and TURN_SIGNAL_LEFT_PIN LOW
   if (!rightTurnSignalPinOn) {
@@ -190,6 +191,7 @@ void handleState() { // operations and transition functions
       // Only true when using interrupts, which we're not right now, but I'm leaving it.
       if (hasLaunched()) {
         ignitionTime = micros64();
+        // TODO: I didn't get a log for this. Troubleshoot.
         logEvent(systemState, STATE_ASCENT, EVENT_LAUNCH_DETECTED);
 #if DEBUG
         Serial.println("Launch detected!");
