@@ -9,7 +9,9 @@
 // Effectiveness is the slope of the deflection vs torque curve at zero deflection, which is what we want for the linear approximation. We can adjust it later if we want to get fancy and account for nonlinearity at higher deflections.
 // Using deflection in degrees, so effectiveness is in Nm/deg
 double calculate_effectiveness(const Vec3 &velocity) {
-  return 1.0 / 360; // Placeholder value
+  const double v = velocity.mag();
+  const double predicted_torque = TORQUE_PER_DEG_50MS * (v * v) / (50.0 * 50.0); // Scale the effectiveness based on velocity squared, normalized to 50 m/s
+  return predicted_torque; // Nm/deg
 }
 
 Deg calculate_deflection_pid(const Quat& qtarget, const double dt) {

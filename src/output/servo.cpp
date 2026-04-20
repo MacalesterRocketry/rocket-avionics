@@ -65,12 +65,10 @@ void init_servos() {
 }
 
 // So 0° is in line with the fin, positive angles rotate it one way, and negative angles rotate it the other way.
-// TODO: Figure out which direction it's rotated and how that affects PID.
 void set_servo_angle(const ServoID servo, const double_t angle_degrees_from_neutral) {
-  constexpr double max_deflection = SERVO_DEGREE_RANGE / 2.0;
-  constexpr double neutral_angle = max_deflection; // can calibrate if need be
-  const double_t clamped_angle = clamp(angle_degrees_from_neutral, SERVO_MIN_ANGLE, SERVO_MAX_ANGLE) + SERVO_NEUTRAL_ANGLE;
-  const double_t progress = (clamped_angle + neutral_angle) / SERVO_DEGREE_RANGE; // 0.0 to 1.0
+  const double_t offset_angle = -angle_degrees_from_neutral + SERVO_NEUTRAL_ANGLE + (SERVO_DEGREE_RANGE / 2.0);
+  const double_t clamped_angle = clamp(offset_angle, SERVO_MIN_ANGLE, SERVO_MAX_ANGLE);
+  const double_t progress = clamped_angle / SERVO_DEGREE_RANGE; // 0.0 to 1.0
   const int32_t micros_position = calc_servo_micros_position(progress);
   get_servo(servo)->writeMicroseconds(micros_position);
 }

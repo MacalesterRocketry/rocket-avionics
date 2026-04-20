@@ -25,6 +25,7 @@
 #define MAG_BIAS_Y (19.96)
 #define MAG_BIAS_Z (-33.43)
 
+// TODO: ADXL375 might have automatic gravity correction. That's not good. Fix.
 #define HIGHG_BIAS_X (9.8)
 #define HIGHG_BIAS_Y (7.85)
 #define HIGHG_BIAS_Z (9.8 - G)
@@ -51,16 +52,18 @@
 
 // PID constants
 #define MOMENT_OF_INERTIA 0.00685 // MoI in kg m²
-#define ROLL_PID_Kp 0.4 // proportional constant
-#define ROLL_PID_Ki 1 // integral constant
-#define ROLL_PID_Kd 2 // derivative constant
+#define BASE_TORQUE 0.0983817 // Nm, based on CFD for 10° deflection at 50 m/s.
+#define TORQUE_PER_DEG_50MS (BASE_TORQUE / 10.0) // Nm/deg, based on CFD for 10° deflection at 50 m/s, assuming a linear relationship
+#define ROLL_PID_Kp 99.4232 // proportional constant
+#define ROLL_PID_Ki 9.1821 // integral constant
+#define ROLL_PID_Kd 24.1417 // derivative constant
 
 // Thresholds
 #define LAUNCH_ACCEL_THRESHOLD_G 4.0
 #define SERVO_DEGREE_RANGE 100.0 // degrees of the physical servo. For example, our smaller servo does 100°
 #define SERVO_MAX_ANGLE 50.0 // degrees, maximum angle the servo can move to when in the fin
 #define SERVO_MIN_ANGLE (-50.0) // degrees, minimum angle the servo can move to when in the fin
-#define SERVO_NEUTRAL_ANGLE (-7.0) // degrees, the angle at which the servo is neutral (pointing straight back)
+#define SERVO_NEUTRAL_ANGLE (-3.0) // degrees, the angle at which the servo is neutral (pointing straight back)
 #define SERVO_MICROS_MIN 1000 // microseconds
 #define SERVO_MICROS_MAX 2000 // microseconds
 #define SERVO_MAX_TORQUE 0.51 // Nm, according to datasheet (5.2 Kgf cm at 7.4V, which is 0.51 Nm)
