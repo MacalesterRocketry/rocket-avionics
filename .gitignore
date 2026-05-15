@@ -7,3 +7,5 @@
 .idea
 flight_data.csv
 assembly.txt
+/target/
+Cargo.lock
