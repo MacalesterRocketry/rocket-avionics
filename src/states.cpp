@@ -20,9 +20,6 @@ SystemState systemState;
 
 uint64_t ignitionTime = 0;
 
-bool leftTurnSignalPinOn = false;
-bool rightTurnSignalPinOn = false;
-
 void initIndicators() {
   pixel.begin();
   pixel.setBrightness(30);
@@ -108,66 +105,15 @@ void indicateState(SystemState state) {
   pixel.show();
 }
 
-void signalLeftTurn() {
-  // multiplexed, so left is TURN_SIGNAL_LEFT_PIN HIGH and TURN_SIGNAL_RIGHT_PIN LOW
-  if (!leftTurnSignalPinOn) {
-    leftTurnSignalPinOn = true;
-    digitalWriteFast(TURN_SIGNAL_LEFT_PIN, HIGH);
-  }
-  if (rightTurnSignalPinOn) {
-    rightTurnSignalPinOn = false;
-    digitalWriteFast(TURN_SIGNAL_RIGHT_PIN, LOW);
-  }
-}
-
-// TODO: Move this all to roll-controller.cpp so we can notify about desired movement, rather than desired orientation
-void signalRightTurn() {
-  // multiplexed, so right is TURN_SIGNAL_RIGHT_PIN HIGH and TURN_SIGNAL_LEFT_PIN LOW
-  if (!rightTurnSignalPinOn) {
-    rightTurnSignalPinOn = true;
-    digitalWriteFast(TURN_SIGNAL_RIGHT_PIN, HIGH);
-  }
-  if (leftTurnSignalPinOn) {
-    leftTurnSignalPinOn = false;
-    digitalWriteFast(TURN_SIGNAL_LEFT_PIN, LOW);
-  }
-}
-
-void clearTurnSignal() {
-  if (leftTurnSignalPinOn) {
-    leftTurnSignalPinOn = false;
-    digitalWriteFast(TURN_SIGNAL_LEFT_PIN, LOW);
-  }
-  if (rightTurnSignalPinOn) {
-    rightTurnSignalPinOn = false;
-    digitalWriteFast(TURN_SIGNAL_RIGHT_PIN, LOW);
-  }
-}
-
 Deg rollProgram() {
   const double timeInFlight = (micros64() - ignitionTime) / 1000000.0;
   // at 2 seconds, roll 90°, then at 4 seconds roll to -90°, then at 6 seconds roll back to 0°
-  if (timeInFlight >= 0 && timeInFlight < 2) {
-#if USE_TURN_SIGNALS
-    clearTurnSignal();
-#endif
+  if (timeInFlight >= 0 && timeInFlight < 3) {
     return 0.0;
   }
-  if (timeInFlight >= 2 && timeInFlight < 4) {
-#if USE_TURN_SIGNALS
-    signalRightTurn();
-#endif
+  if (timeInFlight >= 3 && timeInFlight < 6) {
     return 90.0;
   }
-  if (timeInFlight >= 4 && timeInFlight < 6) {
-#if USE_TURN_SIGNALS
-    signalLeftTurn();
-#endif
-    return -90.0;
-  }
-#if USE_TURN_SIGNALS
-  clearTurnSignal();
-#endif
   return 0.0;
 }
 
@@ -201,7 +147,7 @@ void handleState() { // operations and transition functions
 
       const SensorReadings sensorData = getSensorData();
       update_ahrs(sensorData.lsm.gyro, sensorData.lsm.accel, sensorData.lis3.mag, false);
-      logAHRS(get_orientation(), get_acceleration(), get_velocity(), get_position());
+      logAHRS(get_orientation_earth(), get_acceleration_earth(), get_velocity_earth(), get_position_earth());
       zero_pos_vel(); // On the ground, it's expected to be stationary, so we can zero our position and velocity estimates to correct for any drift during pre-launch.
       // TODO: Is that actually a good idea?
       break;
@@ -213,10 +159,10 @@ void handleState() { // operations and transition functions
         accel = sensorData.adxl.highg_accel;
       }
       update_ahrs(sensorData.lsm.gyro, accel, sensorData.lis3.mag, true);
-      logAHRS(get_orientation(), get_acceleration(), get_velocity(), get_position());
+      logAHRS(get_orientation_earth(), get_acceleration_earth(), get_velocity_earth(), get_position_earth());
 
       // Actuate roll control surfaces based on current orientation and target angle
-      static const Quat base_orientation = get_orientation(); // Set the base orientation at launch
+      static const Quat base_orientation = get_orientation_earth(); // Set the base orientation at launch
       update_roll(rollProgram(), base_orientation);
 
       // TODO: Transition function should probably be some threshold for chute deploy

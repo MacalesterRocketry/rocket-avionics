@@ -21,7 +21,7 @@ Vec3 rotateEarthToBody(const Quat& q, const Vec3& v_e) {
 }
 
 // small helper: axis-angle -> quaternion exact
-Quat axisAngleToQuat(const Vec3& axis, const double angle) {
+Quat axisAngleRadToQuat(const Vec3& axis, const double angle) {
   const double half = angle * 0.5;
   const double s = sin(half);
   return Quat{cos(half), axis.x * s, axis.y * s, axis.z * s};
@@ -36,7 +36,7 @@ Quat deltaQuatFromGyro(const Vec3& omega, const double dt) {
   } else {
     const Vec3 axis = omega / wmag;
     const double theta = wmag * dt;
-    return axisAngleToQuat(axis, theta);
+    return axisAngleRadToQuat(axis, theta);
   }
 }
 
@@ -159,10 +159,10 @@ Vec3 computeBiasMean(const std::vector<Vec3>& samples) {
 struct AHRSState {
   Quat q = {1.0, 0.0, 0.0, 0.0}; // Current orientation quaternion
   uint64_t lastUpdate = 0;
-  Vec3 acceleration = {0, 0, 0};
-  Vec3 velocity = {0, 0, 0};
-  Vec3 position = {0, 0, 0};
-  Vec3 angular_velocity = {0, 0, 0};
+  Vec3 acceleration_earth = {0, 0, 0};
+  Vec3 velocity_earth = {0, 0, 0};
+  Vec3 position_earth = {0, 0, 0};
+  Vec3 angular_velocity_body = {0, 0, 0};
 };
 static AHRSState state;
 
@@ -203,11 +203,11 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag, const boo
   const Vec3 earthGyro = rotateBodyToEarth(q4, gyro);
   const Vec3 earthMag = rotateBodyToEarth(q4, mag);
 
-  state.acceleration = earthAccel - Vec3{0, 0, G}; // Subtract gravity to get linear acceleration in earth frame
-  state.velocity += earthAccel * dt;
-  state.position += state.velocity * dt;
+  state.acceleration_earth = earthAccel - Vec3{0, G, 0}; // Subtract gravity to get linear acceleration in earth frame
+  state.velocity_earth += earthAccel * dt;
+  state.position_earth += state.velocity_earth * dt;
 
-  state.angular_velocity = gyro; // still in body frame, but we can use it for control
+  state.angular_velocity_body = gyro; // still in body frame, but we can use it for control
 
   // CONTINUOUS ORIENTATION MONITORING/Active Tracking
 #if DEBUG and DEBUG_PRINT_ORIENTATION
@@ -225,11 +225,11 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag, const boo
     Serial.printf("Euler: Roll=%.1f°, Pitch=%.1f°, Yaw=%.1f°\r\n",
                   roll, pitch, yaw);
     Serial.printf("Earth Accel: X=%.2f, Y=%.2f, Z=%.2f m/s²\r\n",
-                  state.acceleration.x, state.acceleration.y, state.acceleration.z);
+                  state.acceleration_earth.x, state.acceleration_earth.y, state.acceleration_earth.z);
     Serial.printf("Earth Velocity: X=%.2f, Y=%.2f, Z=%.2f m/s\r\n",
-                  state.velocity.x, state.velocity.y, state.velocity.z);
+                  state.velocity_earth.x, state.velocity_earth.y, state.velocity_earth.z);
     Serial.printf("Earth Position: X=%.2f, Y=%.2f, Z=%.2f m\r\n",
-                  state.position.x, state.position.y, state.position.z);
+                  state.position_earth.x, state.position_earth.y, state.position_earth.z);
     Serial.println("==========================");
 
     lastPrint = now_micros;
@@ -239,26 +239,26 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag, const boo
 void start_ahrs() {
   state.lastUpdate = micros64();
 }
-Quat get_orientation() {
+Quat get_orientation_earth() {
   return state.q;
 }
 
-Vec3 get_acceleration() {
-  return state.acceleration;
+Vec3 get_acceleration_earth() {
+  return state.acceleration_earth;
 }
-Vec3 get_velocity() {
-  return state.velocity;
+Vec3 get_velocity_earth() {
+  return state.velocity_earth;
 }
-Vec3 get_position() {
-  return state.position;
+Vec3 get_position_earth() {
+  return state.position_earth;
 }
-Vec3 get_angular_velocity() {
-  return state.angular_velocity;
+Vec3 get_angular_velocity_body() {
+  return state.angular_velocity_body;
 }
 
 void zero_pos_vel() {
-  state.position = {0, 0, 0};
-  state.velocity = {0, 0, 0};
+  state.position_earth = {0, 0, 0};
+  state.velocity_earth = {0, 0, 0};
 }
 
 Rad calculate_pitch_rad(const Quat& q) {
@@ -271,7 +271,7 @@ Rad calculate_yaw_rad(const Quat& q) {
 }
 
 Rad calculate_roll_rad(const Quat& q) {
-  return atan2(2.0 * (q.w * q.z + q.x * q.y),
+  return -atan2(2.0 * (q.w * q.z + q.x * q.y),
                1.0 - 2.0 * (q.y * q.y + q.z * q.z));
 }
 
@@ -287,17 +287,26 @@ Deg calculate_yaw_deg(const Quat& q) {
   return radToDeg(calculate_yaw_rad(q));
 }
 
-Quat yaw_deg_to_quat(const Deg roll) {
-  const double roll_rad = degToRad(roll);
-  return axisAngleToQuat({1, 0, 0}, roll_rad);
+Quat yaw_rad_to_quat(const Rad roll) {
+  return axisAngleRadToQuat({1, 0, 0}, roll);
 }
 
-Quat pitch_deg_to_quat(const Deg yaw) {
-  const double yaw_rad = degToRad(yaw);
-  return axisAngleToQuat({0, 0, 1}, yaw_rad);
+Quat pitch_rad_to_quat(const Rad yaw) {
+  return axisAngleRadToQuat({0, 0, 1}, yaw);
 }
 
-Quat roll_deg_to_quat(const Deg pitch) {
-  const double pitch_rad = degToRad(pitch);
-  return axisAngleToQuat({0, 1, 0}, pitch_rad);
+Quat roll_rad_to_quat(const Rad pitch) {
+  return axisAngleRadToQuat({0, 1, 0}, pitch);
+}
+
+Quat yaw_deg_to_quat(const Deg yaw) {
+  return yaw_rad_to_quat(degToRad(yaw));
+}
+
+Quat pitch_deg_to_quat(const Deg pitch) {
+  return pitch_rad_to_quat(degToRad(pitch));
+}
+
+Quat roll_deg_to_quat(const Deg roll) {
+  return roll_rad_to_quat(degToRad(roll));
 }

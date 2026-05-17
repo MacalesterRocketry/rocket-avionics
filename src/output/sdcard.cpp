@@ -12,6 +12,10 @@ SdSpiConfig config(SD_CS_PIN, DEDICATED_SPI, SD_SCK_MHZ(50), &SPI1); // 50MHz is
 uint32_t lastSyncTime = 0;
 
 void initSDCard() {
+#if DEBUG and not DEBUG_SD
+  Serial.println("SD card logging disabled in debug mode");
+  return;
+#endif
 #if DEBUG
   Serial.println("Initializing SD card...");
 #endif
@@ -62,6 +66,9 @@ bool fileOpen() {
 }
 
 void logPacket(const PacketType type, const void* data, const size_t size) {
+#if DEBUG and not DEBUG_SD
+  return;
+#endif
   if (!fileOpen()) {
     error("Data file closed unexpectedly when logging", false);
     // logEvent(systemState, STATE_FILE_CLOSED, EVENT_OTHER); // TODO: Make this an error flag so it stays in the same state

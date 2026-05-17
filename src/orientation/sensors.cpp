@@ -113,6 +113,20 @@ void initSensors() {
 
 LSMReading readLSM() {
   lsm6dsox.getEvent(&lowg_accel, &gyro, &lsm6ds_temp);
+  //const LSMReading reading{
+  //  .accel = {
+  //    -(lowg_accel.acceleration.y - LOWG_BIAS_Y),
+  //    lowg_accel.acceleration.x - LOWG_BIAS_X,
+  //    lowg_accel.acceleration.z - LOWG_BIAS_Z
+  //  },
+  //  // TODO: Swap these axes around.
+  //  //  And then do I need to also realign the axes on the accelerometers and magnetometer?
+  //  .gyro = {
+  //    -(gyro.gyro.y - GYRO_BIAS_Y), // Swap X and Y axes, and invert new X axis to match expected orientation
+  //    gyro.gyro.x - GYRO_BIAS_X,
+  //    gyro.gyro.z - GYRO_BIAS_Z
+  //  },
+
   const LSMReading reading{
     .accel = {
       lowg_accel.acceleration.x - LOWG_BIAS_X,

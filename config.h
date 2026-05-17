@@ -2,9 +2,10 @@
 
 // TODO: On some boots, the loop is extremely slow (like 5 seconds), resulting in failures of launch detection and servo movement. Troubleshoot this.
 
-#define DEBUG 0
+#define DEBUG 1
+#define DEBUG_SD 0
 #define DEBUG_PRINT_SENSORS 0
-#define DEBUG_PRINT_ORIENTATION 0
+#define DEBUG_PRINT_ORIENTATION 1
 #define DEBUG_PRINT_ROLL_CONTROL 0
 
 #define PID_TUNING 0
@@ -52,11 +53,11 @@
 
 // PID constants
 #define MOMENT_OF_INERTIA 0.00685 // MoI in kg m²
-#define BASE_TORQUE 0.0983817 // Nm, based on CFD for 10° deflection at 50 m/s.
+#define BASE_TORQUE 0.429709735258359 // Nm, based on CFD for 10° deflection at 50 m/s.
 #define TORQUE_PER_DEG_50MS (BASE_TORQUE / 10.0) // Nm/deg, based on CFD for 10° deflection at 50 m/s, assuming a linear relationship
-#define ROLL_PID_Kp 99.4232 // proportional constant
-#define ROLL_PID_Ki 9.1821 // integral constant
-#define ROLL_PID_Kd 24.1417 // derivative constant
+#define ROLL_PID_Kp 68.1295 // proportional constant
+#define ROLL_PID_Ki 2.2519 // integral constant
+#define ROLL_PID_Kd 20.8804 // derivative constant
 
 // Thresholds
 #define LAUNCH_ACCEL_THRESHOLD_G 4.0
