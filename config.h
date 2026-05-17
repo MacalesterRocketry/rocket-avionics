@@ -2,11 +2,11 @@
 
 // TODO: On some boots, the loop is extremely slow (like 5 seconds), resulting in failures of launch detection and servo movement. Troubleshoot this.
 
-#define DEBUG 1
+#define DEBUG 0
 #define DEBUG_SD 0
 #define DEBUG_PRINT_SENSORS 0
-#define DEBUG_PRINT_ORIENTATION 1
-#define DEBUG_PRINT_ROLL_CONTROL 0
+#define DEBUG_PRINT_ORIENTATION 0
+#define DEBUG_PRINT_ROLL_CONTROL 1
 
 #define PID_TUNING 0
 #define SERVO_TESTING 0

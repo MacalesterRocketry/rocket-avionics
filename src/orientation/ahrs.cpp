@@ -203,8 +203,11 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag, const boo
   const Vec3 earthGyro = rotateBodyToEarth(q4, gyro);
   const Vec3 earthMag = rotateBodyToEarth(q4, mag);
 
-  state.acceleration_earth = earthAccel - Vec3{0, G, 0}; // Subtract gravity to get linear acceleration in earth frame
-  state.velocity_earth += earthAccel * dt;
+  state.acceleration_earth = earthAccel;
+  if (!in_flight) {
+    state.acceleration_earth -= Vec3{0, 0, G}; // Remove gravity from vertical acceleration when on the ground
+  }
+  state.velocity_earth += state.acceleration_earth * dt;
   state.position_earth += state.velocity_earth * dt;
 
   state.angular_velocity_body = gyro; // still in body frame, but we can use it for control
