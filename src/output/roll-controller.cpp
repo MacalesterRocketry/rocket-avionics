@@ -119,15 +119,15 @@ void update_roll(const Deg target_angle, const Quat& base_orientation) {
   // CONTROL LOOP (Until target reached)
   static uint64_t last_time = micros64();
   if (abs(target_angle - current_angle) > 1) {
-    if (target_angle - current_angle > 0) {
-      signalRightTurn();
-    } else {
-      signalLeftTurn();
-    }
     const uint64_t now_micros = micros64();
     const double dt = (now_micros - last_time) / 1000000.0;
     const double fin_deflection_angle = calculate_deflection_pid(qtarget, dt);
     logRollControl(target_angle, current_angle, fin_deflection_angle);
+    if (fin_deflection_angle > 0) {
+      signalRightTurn();
+    } else {
+      signalLeftTurn();
+    }
 #if DEBUG and DEBUG_PRINT_ROLL_CONTROL
     Serial.print("Target Roll: ");
     Serial.print(target_angle);

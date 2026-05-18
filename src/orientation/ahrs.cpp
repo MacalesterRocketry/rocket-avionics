@@ -203,10 +203,7 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag, const boo
   const Vec3 earthGyro = rotateBodyToEarth(q4, gyro);
   const Vec3 earthMag = rotateBodyToEarth(q4, mag);
 
-  state.acceleration_earth = earthAccel;
-  if (!in_flight) {
-    state.acceleration_earth -= Vec3{0, 0, G}; // Remove gravity from vertical acceleration when on the ground
-  }
+  state.acceleration_earth = earthAccel - Vec3{0, 0, G}; // Remove gravity from vertical acceleration when on the ground
   state.velocity_earth += state.acceleration_earth * dt;
   state.position_earth += state.velocity_earth * dt;
 
@@ -229,6 +226,8 @@ void update_ahrs(const Vec3& gyro, const Vec3& accel, const Vec3& mag, const boo
                   roll, pitch, yaw);
     Serial.printf("Earth Accel: X=%.2f, Y=%.2f, Z=%.2f m/s²\r\n",
                   state.acceleration_earth.x, state.acceleration_earth.y, state.acceleration_earth.z);
+    Serial.printf("Rocket Accel: X=%.2f, y=%.2f, Z=%.2f m/s²\r\n",
+                  accel.x, accel.y, accel.z);
     Serial.printf("Earth Velocity: X=%.2f, Y=%.2f, Z=%.2f m/s\r\n",
                   state.velocity_earth.x, state.velocity_earth.y, state.velocity_earth.z);
     Serial.printf("Earth Position: X=%.2f, Y=%.2f, Z=%.2f m\r\n",
