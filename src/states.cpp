@@ -25,10 +25,6 @@ void initIndicators() {
   pixel.setBrightness(30);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWriteFast(BUZZER_PIN, LOW);
-#if USE_TURN_SIGNALS
-  pinMode(TURN_SIGNAL_LEFT_PIN, OUTPUT);
-  pinMode(TURN_SIGNAL_RIGHT_PIN, OUTPUT);
-#endif
 }
 
 void wait(const int milliseconds) {

@@ -59,6 +59,7 @@ void initGPS() {
   Serial.println("GPS initialization complete");
 #endif
 
+  // TODO: Only do this after getting GPS lock
   logDatetime(GPS.year, GPS.month, GPS.day, GPS.hour, GPS.minute, GPS.seconds);
 }
 

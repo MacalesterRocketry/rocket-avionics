@@ -17,7 +17,6 @@
 #define SYNC_INTERVAL_MS 5000
 
 #define USE_GPS 1
-#define USE_TURN_SIGNALS 1
 
 // Calibration
 #define G 9.80579 // North Branch gravity in m/s²
@@ -96,9 +95,6 @@
 #define BATTERY_VOLTAGE_PIN A3
 #define BATTERY_VOLTAGE_R1 100000.0 // 100kOhm voltage divider resistors for the battery voltage measurements
 #define BATTERY_VOLTAGE_R2 100000.0
-
-#define TURN_SIGNAL_LEFT_PIN A0
-#define TURN_SIGNAL_RIGHT_PIN A1
 
 #elif HARDWARE_VERSION == 1
 #define SD_CS_PIN 23

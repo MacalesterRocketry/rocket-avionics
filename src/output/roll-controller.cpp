@@ -7,44 +7,6 @@
 #include "output/sdcard.h"
 
 
-bool leftTurnSignalPinOn = false;
-bool rightTurnSignalPinOn = false;
-void signalLeftTurn() {
-  // multiplexed, so left is TURN_SIGNAL_LEFT_PIN HIGH and TURN_SIGNAL_RIGHT_PIN LOW
-  if (!leftTurnSignalPinOn) {
-    leftTurnSignalPinOn = true;
-    digitalWriteFast(TURN_SIGNAL_LEFT_PIN, HIGH);
-  }
-  if (rightTurnSignalPinOn) {
-    rightTurnSignalPinOn = false;
-    digitalWriteFast(TURN_SIGNAL_RIGHT_PIN, LOW);
-  }
-}
-
-void signalRightTurn() {
-  // multiplexed, so right is TURN_SIGNAL_RIGHT_PIN HIGH and TURN_SIGNAL_LEFT_PIN LOW
-  if (!rightTurnSignalPinOn) {
-    rightTurnSignalPinOn = true;
-    digitalWriteFast(TURN_SIGNAL_RIGHT_PIN, HIGH);
-  }
-  if (leftTurnSignalPinOn) {
-    leftTurnSignalPinOn = false;
-    digitalWriteFast(TURN_SIGNAL_LEFT_PIN, LOW);
-  }
-}
-
-void clearTurnSignal() {
-  if (leftTurnSignalPinOn) {
-    leftTurnSignalPinOn = false;
-    digitalWriteFast(TURN_SIGNAL_LEFT_PIN, LOW);
-  }
-  if (rightTurnSignalPinOn) {
-    rightTurnSignalPinOn = false;
-    digitalWriteFast(TURN_SIGNAL_RIGHT_PIN, LOW);
-  }
-}
-
-
 // Effectiveness is the slope of the deflection vs torque curve at zero deflection, which is what we want for the linear approximation. We can adjust it later if we want to get fancy and account for nonlinearity at higher deflections.
 // Using deflection in degrees, so effectiveness is in Nm/deg
 double calculate_effectiveness(const Vec3 &velocity) {
@@ -123,11 +85,6 @@ void update_roll(const Deg target_angle, const Quat& base_orientation) {
     const double dt = (now_micros - last_time) / 1000000.0;
     const double fin_deflection_angle = calculate_deflection_pid(qtarget, dt);
     logRollControl(target_angle, current_angle, fin_deflection_angle);
-    if (fin_deflection_angle > 0) {
-      signalRightTurn();
-    } else {
-      signalLeftTurn();
-    }
 #if DEBUG and DEBUG_PRINT_ROLL_CONTROL
     Serial.print("Target Roll: ");
     Serial.print(target_angle);
@@ -144,8 +101,5 @@ void update_roll(const Deg target_angle, const Quat& base_orientation) {
     }
 
     last_time = now_micros;
-  } else {
-    // Clear turn signals when we're close enough to the target
-    clearTurnSignal();
   }
 }
