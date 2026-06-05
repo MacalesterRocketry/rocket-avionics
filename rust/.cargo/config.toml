@@ -1,0 +1,30 @@
+[build]
+# RP2350A/B Arm cores are Cortex-M33 with the FPv5-SP single-precision FPU.
+# Hazard-3 RISC-V cores are not targeted here (yet) — see PORTING_PLAN.md.
+target = "thumbv8m.main-none-eabihf"
+
+[target.thumbv8m.main-none-eabihf]
+# probe-rs handles RP2350 (chip = "RP235xA") out of the box. Install with
+#   cargo install probe-rs-tools --locked
+# and flash with: `cargo run --release` once a probe (Picoprobe/Debug Probe) is
+# attached. UF2 flashing is also supported via picotool; instructions in the
+# porting plan.
+runner = "probe-rs run --chip RP235xA --log-format '{t} {L} {s} {[email protected]}'"
+
+rustflags = [
+  "-C", "link-arg=--nmagic",
+  "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tdefmt.x",
+  # M33 with FPv5-SP: tell LLVM the FPU is there so f32 math uses VFP instructions.
+  "-C", "target-cpu=cortex-m33",
+  "-C", "target-feature=+fp-armv8d16sp",
+]
+
+[env]
+DEFMT_LOG = "info"
+
+# Convenience aliases. Run host-side tests against the math/log-format code with
+#   cargo hosttest
+# to bypass the embedded target restriction set above.
+[alias]
+hosttest = ["test", "--target", "x86_64-unknown-linux-gnu", "--features", "host-tests"]

@@ -1,0 +1,114 @@
+[package]
+name = "rocket-avionics"
+version = "0.1.0"
+edition = "2024"
+description = "Macalester rocket avionics, Rust + Embassy port for RP2350"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "rocket-avionics"
+path = "src/main.rs"
+test = false
+bench = false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Firmware deps (no_std, target = thumbv8m.main-none-eabihf)
+# ─────────────────────────────────────────────────────────────────────────────
+[dependencies]
+# Embassy core. RP2350A = "rp235xa" feature (40-pin, like Pico 2 / Feather RP2350).
+# Switch to "rp235xb" if you spin a board around the larger RP2350B (QFN-80).
+embassy-rp        = { version = "0.10.0", features = ["rp235xb", "time-driver", "critical-section-impl", "binary-info", "rt", "unstable-pac", "defmt", "rom-v2-intrinsics"] }
+embassy-executor  = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "defmt"] }
+embassy-time      = { version = "0.5", features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-sync      = { version = "0.8", features = ["defmt"] }
+embassy-futures   = "0.1"
+embassy-embedded-hal = "0.6"
+
+# HAL traits
+embedded-hal           = "1.0"
+embedded-hal-async     = "1.0"
+embedded-hal-bus       = { version = "0.3", features = ["async"] }
+embedded-io-async      = "0.7"
+
+# Cortex-M runtime
+cortex-m              = { version = "0.7", features = ["inline-asm"] }
+cortex-m-rt           = "0.7"
+
+# Logging / panic handling
+defmt        = "1.1"
+defmt-rtt    = "1.2"
+panic-probe  = { version = "1.0", features = ["print-defmt"] }
+
+# Math: libm gives us sin/cos/sqrt/atan2 in no_std; we keep f64 to mirror the
+# C++ behavior. Hardware FPU on M33 is single-precision only, so f64 is software
+# — same situation as the current RP2040, just less bad (M33 has a real ALU).
+libm = "0.2"
+
+# Bitflags for the Error mask (mirrors enum Error : uint16_t bitmask)
+bitflags = "2.11"
+
+# Static cells for global storage that must be initialized once
+static_cell = "2.1"
+
+# Unit definitions using UOM
+uom = { version = "0.38", default-features = false, features = [ "f64", "si" ] }
+num-traits = { version = "0.2", default-features = false, features = [ "libm" ] }
+
+# SD card over SPI. embedded-sdmmc supports FAT16/32 and is the de-facto choice.
+embedded-sdmmc = { version = "0.9", default-features = false, features = ["defmt-log"] }
+
+# NMEA parsing for the MTK3333 GPS. Pulls in heapless; we'll only enable the
+# RMC + GGA sentence parsers to keep flash + RAM cost down.
+nmea = { version = "0.7", default-features = false, features = ["GGA", "RMC"] }
+
+# Lock-free fixed-size queue for sensor→SD packet handoff between cores.
+heapless = { version = "0.9", features = ["defmt"] }
+
+# ─── Sensor driver crates (all TODO — picked but not yet integrated) ─────────
+# These compile cleanly as deps but are not yet wired in. See PORTING_PLAN.md
+# for the per-sensor strategy and the “write a thin driver if no crate fits” notes.
+lsm6dsox  = { version = "2.1", optional = true }   # gyro + low-G accel
+lis3mdl   = { version = "0.1", optional = true }   # magnetometer TODO: fork and improve the driver, it's not great
+bmp390-rs = { version = "0.4", optional = true }   # barometer and temperature sensor
+# TODO: Add ADXL375 crate, maybe https://crates.io/crates/adxl343?
+
+[features]
+default = ["sensors"]
+# Group the optional sensor driver crates behind one feature so `cargo check`
+# without the full set still passes during early porting.
+sensors = ["dep:lsm6dsox", "dep:lis3mdl", "dep:bmp390-rs"]
+# Hardware-revision flag mirroring the C++ HARDWARE_VERSION macro. The current
+# flight hardware is rev 2 (custom FeatherWing); rev 3 is the new RP2350 PCB.
+hw-v2 = []
+hw-v3 = []
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Host-side dev-deps for `cargo test` of pure-math code (Vec3, Quat, packet
+# serialization). These never reach the firmware binary.
+# ─────────────────────────────────────────────────────────────────────────────
+[dev-dependencies]
+approx = "0.5"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Release profile: optimize for size + speed. LTO + abort-on-panic are standard
+# for embedded; debug = 2 keeps defmt + debugger info without bloating flash.
+# ─────────────────────────────────────────────────────────────────────────────
+[profile.release]
+codegen-units = 1
+debug         = 2
+debug-assertions = false
+incremental   = false
+lto           = "fat"
+opt-level     = "s"
+overflow-checks = false
+panic         = "abort"
+
+[profile.dev]
+codegen-units = 1
+debug         = 2
+debug-assertions = true
+incremental   = true
+opt-level     = 1          # opt-level 0 in dev is unusably slow for the AHRS
+overflow-checks = true
+panic         = "abort"
