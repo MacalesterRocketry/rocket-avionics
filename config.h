@@ -1,7 +1,5 @@
 #pragma once
 
-// TODO: On some boots, the loop is extremely slow (like 5 seconds), resulting in failures of launch detection and servo movement. Troubleshoot this.
-
 #define DEBUG 0
 #define DEBUG_SD 0
 #define DEBUG_PRINT_SENSORS 0
@@ -71,9 +69,32 @@
 #define ACCELEROMETER_SWITCH_THRESHOLD (15.9 * G) // Low-G accelerometer saturates at 16G
 
 // Pin definitions
-#define HARDWARE_VERSION 2
+#define HARDWARE_VERSION 3
 
-#if HARDWARE_VERSION == 2
+#if HARDWARE_VERSION == 3
+#define SD_CS_PIN 39
+#define BUZZER_PIN 43
+#define NEOPIXEL_PIN 25
+#define EJECT_BUTTON 24
+
+#define ADXL_INT1_PIN 5
+#define ADXL_INT2_PIN 6
+#define LSM_INT1_PIN 9
+#define LSM_INT2_PIN 10
+#define LIS3_INT1_PIN 11
+#define LIS3_INT2_PIN 12
+#define BMP_INT_PIN 13
+
+#define SERVO_XPLUS_PIN 25
+#define SERVO_XMINUS_PIN 14
+#define SERVO_YPLUS_PIN 15
+#define SERVO_YMINUS_PIN 8
+
+#define BATTERY_VOLTAGE_PIN 44
+#define BATTERY_VOLTAGE_R1 100000.0 // 100kOhm voltage divider resistors for the battery voltage measurements
+#define BATTERY_VOLTAGE_R2 100000.0
+
+#elif HARDWARE_VERSION == 2
 #define SD_CS_PIN 23
 #define BUZZER_PIN A2
 #define NEOPIXEL_PIN 4

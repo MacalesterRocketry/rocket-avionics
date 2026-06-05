@@ -16,7 +16,7 @@ extern crate uom;
 use defmt_rtt as _;
 use panic_probe as _;
 
-use embassy_executor::Executor;
+use embassy_executor::{Executor, SpawnError, SpawnToken};
 use embassy_rp::multicore::{spawn_core1, Stack};
 use static_cell::StaticCell;
 
@@ -34,7 +34,7 @@ mod types;
 // share cache lines with the AHRS data on core 0. If a panic-probe trace shows
 // core 1 stack overflow, bump this — there's 4 KiB of headroom in SCRATCH_X
 // minus the linker-reserved bits.
-// #[link_section = ".core1_stack"]
+#[unsafe(link_section = ".core1_stack")]
 static mut CORE1_STACK: Stack<4096> = Stack::new();
 
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
@@ -47,15 +47,20 @@ fn main() -> ! {
     // Spawn core 1's executor first so it's ready to receive packets the
     // moment core 0 starts producing them.
     spawn_core1(p.CORE1, unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) }, move || {
-        let executor1 = EXECUTOR1.init(Executor::new());
-        executor1.run(|spawner| {
-            spawner.spawn(core1_main()).ok();
-        });
+        spawn_core(EXECUTOR1.init(Executor::new()), core1_main())
     });
 
-    let executor0 = EXECUTOR0.init(Executor::new());
-    executor0.run(|spawner| {
-        spawner.spawn(core0_main()).ok();
+    spawn_core(EXECUTOR0.init(Executor::new()), core0_main())
+}
+
+fn spawn_core(executor: &'static mut Executor, core_main: Result<SpawnToken<impl Sized>, SpawnError>) -> ! {
+    executor.run(|spawner| {
+        let core2_task = core_main.unwrap_or_else(|e| {
+            defmt::error!("core 1: failed to spawn task: {:?}", e);
+            panic!("core 1 task spawn failed");
+        });
+
+        spawner.spawn(core2_task);
     });
 }
 

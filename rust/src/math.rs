@@ -12,74 +12,28 @@ use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 // libm provides no_std math intrinsics. On host (cargo test) we still use libm
 // for bit-identical behavior with the firmware build.
 use libm::{atan2, cos, sin, sqrt};
-use uom::Kind;
-use uom::si::angle::radian;
-use uom::si::angular_acceleration::Units::radian_per_second_squared;
-use uom::si::angular_velocity::radian_per_second;
-use uom::si::f64::*;
-use uom::num_traits::Float;
-use uom::si::marker::AngleKind;
-use uom::si::Quantity;
+
+pub type Rad = f64;
+pub type Deg = f64;
 
 #[inline]
-pub fn clamp<T: PartialOrd>(value: T, min: T, max: T) -> T {
-    if value < min {
-        min
-    } else if value > max {
-        max
+pub fn rad_to_deg(r: Rad) -> Deg {
+    r * 180.0 / core::f64::consts::PI
+}
+
+#[inline]
+pub fn deg_to_rad(d: Deg) -> Rad {
+    d * core::f64::consts::PI / 180.0
+}
+
+#[inline]
+pub fn clamp(x: f64, lo: f64, hi: f64) -> f64 {
+    if x < lo {
+        lo
+    } else if x > hi {
+        hi
     } else {
-        value
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AngularVelocityVector {
-    pub x: AngularVelocity,
-    pub y: AngularVelocity,
-    pub z: AngularVelocity,
-}
-impl AngularVelocityVector {
-    #[inline]
-    pub const fn new(x: AngularVelocity, y: AngularVelocity, z: AngularVelocity) -> Self {
-        Self { x, y, z }
-    }
-
-    #[inline]
-    pub fn norm(&self) -> AngularVelocity {
-        let x = self.x.get::<radian_per_second>();
-        let y = self.y.get::<radian_per_second>();
-        let z = self.z.get::<radian_per_second>();
-        AngularVelocity::new::<radian_per_second>((x * x + y * y + z * z).sqrt())
-    }
-}
-impl Div<AngularVelocity> for AngularVelocityVector {
-    type Output = Vec3;
-    #[inline]
-    fn div(self, s: AngularVelocity) -> Vec3 {
-        Vec3::new(
-            self.x.get::<radian_per_second>() / s.get::<radian_per_second>(),
-            self.y.get::<radian_per_second>() / s.get::<radian_per_second>(),
-            self.z.get::<radian_per_second>() / s.get::<radian_per_second>(),
-        )
-    }
-}
-
-impl Mul<Time> for AngularVelocity {
-    type Output = Angle;
-
-    fn mul(self, rhs: Time) -> Angle {
-        Angle::new::<radian>(
-            self.get::<radian_per_second>() * rhs.get::<second>()
-        )
-    }
-}
-
-// And the commutative case:
-impl Mul<AngularVelocity> for Time {
-    type Output = Angle;
-
-    fn mul(self, rhs: AngularVelocity) -> Angle {
-        rhs * self
+        x
     }
 }
 
@@ -92,11 +46,7 @@ pub struct Vec3 {
 }
 
 impl Vec3 {
-    pub const ZERO: Vec3 = Vec3 {
-        x: 0.0,
-        y: 0.0,
-        z: 0.0,
-    };
+    pub const ZERO: Vec3 = Vec3 { x: 0.0, y: 0.0, z: 0.0 };
 
     #[inline]
     pub const fn new(x: f64, y: f64, z: f64) -> Self {
@@ -213,25 +163,11 @@ impl Default for Quat {
 }
 
 impl Quat {
-    pub const IDENTITY: Quat = Quat {
-        w: 1.0,
-        x: 0.0,
-        y: 0.0,
-        z: 0.0,
-    };
+    pub const IDENTITY: Quat = Quat { w: 1.0, x: 0.0, y: 0.0, z: 0.0 };
 
     #[inline]
     pub const fn new(w: f64, x: f64, y: f64, z: f64) -> Self {
         Self { w, x, y, z }
-    }
-
-    pub fn from_angle(w: f64, x_angle: Angle, y_angle: Angle, z_angle: Angle) -> Self {
-        Self {
-            w,
-            x: x_angle.get::<radian>(),
-            y: y_angle.get::<radian>(),
-            z: z_angle.get::<radian>(),
-        }
     }
 
     #[inline]
@@ -362,37 +298,39 @@ impl DivAssign<f64> for Grad4 {
 
 // ───────────────────── axis-angle and Euler conversions ─────────────────────
 #[inline]
-pub fn axis_angle_to_quat(axis: Vec3, angle: Angle) -> Quat {
-    let half = angle.get::<radian>() * 0.5;
+pub fn axis_angle_to_quat(axis: Vec3, angle: Rad) -> Quat {
+    let half = angle * 0.5;
     let s = sin(half);
     Quat::new(cos(half), axis.x * s, axis.y * s, axis.z * s)
 }
 
 #[inline]
-pub fn roll(q: Quat) -> Angle {
-    Angle::new::<radian>(-atan2(
-        2.0 * (q.w * q.z + q.x * q.y),
-        1.0 - 2.0 * (q.y * q.y + q.z * q.z),
-    ))
+pub fn roll_rad(q: Quat) -> Rad {
+    // Sign matches the C++ source (`-atan2(...)`).
+    -atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 }
 
 #[inline]
-pub fn pitch(q: Quat) -> Angle {
-    Angle::new::<radian>(atan2(
-        2.0 * (q.w * q.x + q.y * q.z),
-        1.0 - 2.0 * (q.x * q.x + q.y * q.y),
-    ))
+pub fn pitch_rad(q: Quat) -> Rad {
+    atan2(2.0 * (q.w * q.x + q.y * q.z), 1.0 - 2.0 * (q.x * q.x + q.y * q.y))
 }
 
 #[inline]
-pub fn yaw(q: Quat) -> Angle {
+pub fn yaw_rad(q: Quat) -> Rad {
     // `asin` via libm
-    Angle::new::<radian>(libm::asin(2.0 * (q.w * q.y - q.z * q.x)))
+    libm::asin(2.0 * (q.w * q.y - q.z * q.x))
 }
 
 #[inline]
-pub fn roll_to_quat(angle: Angle) -> Quat {
-    axis_angle_to_quat(Vec3::new(0.0, 1.0, 0.0), angle)
+pub fn roll_deg(q: Quat) -> Deg { rad_to_deg(roll_rad(q)) }
+#[inline]
+pub fn pitch_deg(q: Quat) -> Deg { rad_to_deg(pitch_rad(q)) }
+#[inline]
+pub fn yaw_deg(q: Quat) -> Deg { rad_to_deg(yaw_rad(q)) }
+
+#[inline]
+pub fn roll_deg_to_quat(deg: Deg) -> Quat {
+    axis_angle_to_quat(Vec3::new(0.0, 1.0, 0.0), deg_to_rad(deg))
 }
 
 #[cfg(test)]
@@ -448,10 +386,7 @@ mod tests {
     #[test]
     fn axis_angle_90deg_z() {
         // 90° about +Z = [cos45, 0, 0, sin45]
-        let q = axis_angle_to_quat(
-            Vec3::new(0.0, 0.0, 1.0),
-            Angle::new::<radian>(core::f64::consts::FRAC_PI_2),
-        );
+        let q = axis_angle_to_quat(Vec3::new(0.0, 0.0, 1.0), core::f64::consts::FRAC_PI_2);
         approx_eq(q.w, libm::cos(core::f64::consts::FRAC_PI_4));
         approx_eq(q.z, libm::sin(core::f64::consts::FRAC_PI_4));
     }

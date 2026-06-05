@@ -1,30 +1,28 @@
-[build]
-# RP2350A/B Arm cores are Cortex-M33 with the FPv5-SP single-precision FPU.
-# Hazard-3 RISC-V cores are not targeted here (yet) — see PORTING_PLAN.md.
-target = "thumbv8m.main-none-eabihf"
-
 [target.thumbv8m.main-none-eabihf]
-# probe-rs handles RP2350 (chip = "RP235xA") out of the box. Install with
-#   cargo install probe-rs-tools --locked
-# and flash with: `cargo run --release` once a probe (Picoprobe/Debug Probe) is
-# attached. UF2 flashing is also supported via picotool; instructions in the
-# porting plan.
-runner = "probe-rs run --chip RP235xA --log-format '{t} {L} {s} {[email protected]}'"
+# Choose a default "cargo run" tool (see README for more info)
+# - `probe-rs` provides flashing and defmt via a hardware debugger, and stack unwind on panic
+# - `picotool` loads an elf, skipping unchanged flash sectors, verify it, and execute it
+runner = "probe-rs run --chip RP235x --protocol swd"
 
+# Pass some extra options to rustc, some of which get passed on to the linker.
+#
+# * linker argument --nmagic turns off page alignment of sections (which saves
+#   flash space)
+# * linker argument -Tlink.x tells the linker to use link.x as a linker script.
+#   This is usually provided by the cortex-m-rt crate, and by default the
+#   version in that crate will include a file called `memory.x` which describes
+#   the particular memory layout for your specific chip.
+# * linker argument -Tdefmt.x also tells the linker to use `defmt.x` as a
+#   secondary linker script. This is required to make defmt_rtt work.
 rustflags = [
   "-C", "link-arg=--nmagic",
   "-C", "link-arg=-Tlink.x",
   "-C", "link-arg=-Tdefmt.x",
-  # M33 with FPv5-SP: tell LLVM the FPU is there so f32 math uses VFP instructions.
   "-C", "target-cpu=cortex-m33",
-  "-C", "target-feature=+fp-armv8d16sp",
 ]
 
-[env]
-DEFMT_LOG = "info"
+[build]
+target = "thumbv8m.main-none-eabihf"
 
-# Convenience aliases. Run host-side tests against the math/log-format code with
-#   cargo hosttest
-# to bypass the embedded target restriction set above.
-[alias]
-hosttest = ["test", "--target", "x86_64-unknown-linux-gnu", "--features", "host-tests"]
+[env]
+DEFMT_LOG = "debug"

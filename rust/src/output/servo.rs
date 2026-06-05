@@ -11,9 +11,7 @@
 
 #![allow(dead_code, unused_variables)]
 
-use uom::si::angle::degree;
-use uom::si::f64::Angle;
-use crate::math::clamp;
+use crate::math::{clamp, Deg};
 use crate::config::{
     SERVO_DEGREE_RANGE, SERVO_MICROS_MAX, SERVO_MICROS_MIN, SERVO_NEUTRAL_ANGLE,
 };
@@ -26,23 +24,21 @@ pub const ALL_SERVOS: [ServoId; 4] =
 
 /// Map a 0.0..=1.0 progress to a pulse width in microseconds.
 #[inline]
-fn calc_servo_micros(progress: f64) -> u32 {
+pub fn calc_servo_micros(progress: f64) -> u32 {
     SERVO_MICROS_MIN + ((SERVO_MICROS_MAX - SERVO_MICROS_MIN) as f64 * progress) as u32
 }
 
 /// Convert an angle (deg, signed, around the fin-neutral point) into a pulse
 /// width in microseconds. Pure math — no I/O — so it's host-testable.
-pub fn angle_to_micros(angle_from_neutral: Angle) -> u32 {
-    let neutral = Angle::new::<degree>(SERVO_NEUTRAL_ANGLE);
-    let range = Angle::new::<degree>(SERVO_DEGREE_RANGE);
-    let offset: Angle = -angle_from_neutral + neutral + (range / 2.0);
-    let clamped = clamp(offset, neutral, range + neutral);
-    let progress = clamped.get::<degree>() / SERVO_DEGREE_RANGE;
+pub fn angle_to_micros(angle_deg_from_neutral: Deg) -> u32 {
+    let offset = -angle_deg_from_neutral + SERVO_NEUTRAL_ANGLE + (SERVO_DEGREE_RANGE / 2.0);
+    let clamped = clamp(offset, SERVO_NEUTRAL_ANGLE, SERVO_DEGREE_RANGE + SERVO_NEUTRAL_ANGLE);
+    let progress = clamped / SERVO_DEGREE_RANGE;
     calc_servo_micros(progress)
 }
 
 /// Set a servo to a deflection angle. TODO: write to the corresponding PWM.
-pub fn set_servo_angle(_servo: ServoId, _angle_from_neutral: Angle) {
+pub fn set_servo_angle(_servo: ServoId, _angle_deg_from_neutral: Deg) {
     // TODO: look up PWM channel from ServoId and call `pwm.set_duty_cycle()`.
 }
 
@@ -54,7 +50,7 @@ mod tests {
     fn neutral_maps_to_midpoint() {
         // At angle = SERVO_NEUTRAL_ANGLE the offset = degree_range/2, progress = 0.5,
         // pulse = midpoint of [SERVO_MICROS_MIN, SERVO_MICROS_MAX].
-        let us = angle_to_micros(Angle::new::<degree>(SERVO_NEUTRAL_ANGLE));
+        let us = angle_to_micros(SERVO_NEUTRAL_ANGLE);
         let mid = (SERVO_MICROS_MIN + SERVO_MICROS_MAX) / 2;
         assert!((us as i64 - mid as i64).abs() <= 1);
     }

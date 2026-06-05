@@ -11,11 +11,8 @@
 
 #![allow(dead_code, unused_variables)]
 
-use uom::si::angle::radian;
-use uom::si::angular_velocity::degree_per_second;
-use uom::si::f64::{Angle, AngularVelocity, Time};
 use crate::config::G;
-use crate::math::{AngularVelocityVector, Grad4, Quat, Vec3};
+use crate::math::{Grad4, Quat, Vec3};
 
 /// Body→earth quaternion rotation: `p = q ⊗ [0, v_b] ⊗ q*`
 pub fn rotate_body_to_earth(q: Quat, v_b: Vec3) -> Vec3 {
@@ -31,17 +28,13 @@ pub fn rotate_earth_to_body(q: Quat, v_e: Vec3) -> Vec3 {
 
 /// Δq from gyro rate `ω` over `dt`. Small-angle branch matches C++ for stability
 /// near zero rotation rate (avoids divide-by-zero in axis-angle form).
-pub fn delta_quat_from_gyro(omega: AngularVelocityVector, dt: Time) -> Quat {
+pub fn delta_quat_from_gyro(omega: Vec3, dt: f64) -> Quat {
     let wmag = omega.norm();
-    let zero_threshold = AngularVelocity::new::<degree_per_second>(1e-12);
-    if wmag < zero_threshold {
-        let x = (0.5 * omega.x * dt).value;
-        let y = (0.5 * omega.y * dt).value;
-        let z = (0.5 * omega.z * dt).value;
-        Quat::new(1.0, x, y, z)
+    if wmag < 1e-12 {
+        Quat::new(1.0, 0.5 * omega.x * dt, 0.5 * omega.y * dt, 0.5 * omega.z * dt)
     } else {
         let axis = omega / wmag;
-        let theta = Angle::new::<radian>((wmag * dt).value);
+        let theta = wmag * dt;
         crate::math::axis_angle_to_quat(axis, theta)
     }
 }

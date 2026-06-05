@@ -7,10 +7,8 @@
 
 #![allow(dead_code, unused_variables)]
 
-use crate::config::TORQUE_PER_DEG_50MS;
-use crate::math::{Quat, Vec3};
-use uom::si::angle::degree;
-use uom::si::f64::*;
+use crate::config::{MOMENT_OF_INERTIA, ROLL_PID_KD, ROLL_PID_KI, ROLL_PID_KP, TORQUE_PER_DEG_50MS};
+use crate::math::{Deg, Quat, Vec3};
 
 /// Fin effectiveness (N·m per degree) at a given airspeed. Linear-in-deflection
 /// approximation, quadratic-in-velocity. Matches `calculate_effectiveness`.
@@ -38,7 +36,7 @@ impl RollPid {
         _angular_velocity_body: Vec3,
         _velocity_earth: Vec3,
         _dt: f64,
-    ) -> Angle {
-        Angle::new::<degree>(0.0)
+    ) -> Deg {
+        0.0
     }
 }
