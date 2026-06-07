@@ -92,79 +92,140 @@ pub const ACCELEROMETER_SWITCH_THRESHOLD: f64 = 15.9 * G;
 pub const BATTERY_VOLTAGE_R1: f64 = 100_000.0;
 pub const BATTERY_VOLTAGE_R2: f64 = 100_000.0;
 
-// ───────────────────────── pin assignments (rev-gated) ──────────────────────
-// The custom RP2350 PCB pinout isn't finalized; these placeholders keep the
-// module structure consistent. Override per-revision under `cfg(feature)`.
-// Use `Pin::PIN_NN` constants from embassy-rp when wiring these into peripheral
-// init code — the integer here is the GPIO index.
-#[cfg(feature = "hw-v2")]
-pub mod pins {
-    // RP2040 Adalogger custom FeatherWing (current flight hardware).
-    pub const SD_CS: u8 = 23;
-    pub const BUZZER: u8 = 28; // formerly A2
-    pub const NEOPIXEL: u8 = 4;
-    pub const EJECT_BUTTON: u8 = 24;
-    pub const ADXL_INT1: u8 = 5;
-    pub const ADXL_INT2: u8 = 6;
-    pub const LSM_INT1: u8 = 9;
-    pub const LSM_INT2: u8 = 10;
-    pub const LIS3_INT1: u8 = 11;
-    pub const LIS3_INT2: u8 = 12;
-    pub const BMP_INT: u8 = 13;
-    pub const SERVO_XPLUS: u8 = 25;
-    pub const SERVO_XMINUS: u8 = 14;
-    pub const SERVO_YPLUS: u8 = 15;
-    pub const SERVO_YMINUS: u8 = 8;
-    pub const BATTERY_VOLTAGE: u8 = 29; // formerly A3
-    pub const TURN_SIGNAL_LEFT: u8 = 26; // formerly A0
-    pub const TURN_SIGNAL_RIGHT: u8 = 27; // formerly A1
+macro_rules! define_hardware {
+    (
+        $main_struct:ident {
+            // Match all grouped subsystems (e.g., I2cConfig, SdConfig)
+            $(
+                $group_field:ident : $group_struct:ident {
+                    $( $sub_field:ident : $sub_pin:ident ),* $(,)?
+                }
+            ),* $(,)?
+        }
+    ) => {
+        // 1. Generate all the sub-structs
+        $(
+            pub struct $group_struct {
+                $( pub $sub_field: embassy_rp::Peri<'static, embassy_rp::peripherals::$sub_pin> ),*
+            }
+        )*
+
+        // 2. Generate the main hardware struct
+        pub struct $main_struct {
+            $( pub $group_field: $group_struct, )*
+        }
+
+        // 3. Generate the partial-move extraction macro
+        #[macro_export]
+        macro_rules! take_hardware {
+            ($p:expr) => {
+                crate::config::board::$main_struct {
+                    $(
+                        $group_field: crate::config::board::$group_struct {
+                            $( $sub_field: $p.$sub_pin ),*
+                        },
+                    )*
+                }
+            }
+        }
+    };
 }
 
 #[cfg(feature = "hw-v3")]
-pub mod pins {
-    // Custom RP2350 PCB — TODO: replace placeholders once the schematic is
-    // finalized. Keeping the same logical names lets the rest of the firmware
-    // stay revision-agnostic.
-    pub const SD_CS: u8 = 0;
-    pub const BUZZER: u8 = 1;
-    pub const NEOPIXEL: u8 = 2;
-    pub const EJECT_BUTTON: u8 = 3;
-    pub const ADXL_INT1: u8 = 4;
-    pub const ADXL_INT2: u8 = 5;
-    pub const LSM_INT1: u8 = 6;
-    pub const LSM_INT2: u8 = 7;
-    pub const LIS3_INT1: u8 = 8;
-    pub const LIS3_INT2: u8 = 9;
-    pub const BMP_INT: u8 = 10;
-    pub const SERVO_XPLUS: u8 = 11;
-    pub const SERVO_XMINUS: u8 = 12;
-    pub const SERVO_YPLUS: u8 = 13;
-    pub const SERVO_YMINUS: u8 = 14;
-    pub const BATTERY_VOLTAGE: u8 = 26;
-    pub const TURN_SIGNAL_LEFT: u8 = 15;
-    pub const TURN_SIGNAL_RIGHT: u8 = 16;
+pub mod board {
+    /// External high-speed crystal on the Metro RP2350 board is 12 MHz, as with most RP2350 boards
+    pub(crate) const XTAL_FREQ_HZ: u32 = 12_000_000u32;
+
+    use embassy_rp::Peri;
+    use embassy_rp::peripherals::*;
+
+    // Now you map logical names to physical pins exactly once.
+    // To add a pin, just add one line here.
+    define_hardware!(AvionicsHardware {
+        i2c: I2cConfig {
+            bus: I2C0,
+            sda: PIN_20,
+            scl: PIN_21,
+        },
+        uart: UartConfig {
+            rx: PIN_1,
+            tx: PIN_0,
+        },
+        sd: SdConfig {
+            sclk: PIN_34,
+            mosi: PIN_35,
+            miso: PIN_36,
+            data1: PIN_37,
+            data2: PIN_38,
+            cs: PIN_39,
+            detect: PIN_40,
+        },
+        interrupts: InterruptConfig {
+            adxl_int1: PIN_5,
+            adxl_int2: PIN_6,
+            lsm_int1: PIN_9,
+            lsm_int2: PIN_10,
+            lis3_int1: PIN_11,
+            lis3_int2: PIN_12,
+            bmp_int: PIN_13,
+        },
+        peripherals: PeripheralConfig {
+            neopixel: PIN_25,
+            buzzer: PIN_43,
+            eject_button: PIN_24,
+        },
+    });
 }
 
-// Default to v2 (flight hardware) if no feature was set so `cargo check`
-// against an unconfigured build still resolves all the pin references.
-#[cfg(not(any(feature = "hw-v2", feature = "hw-v3")))]
-pub mod pins {
-    pub const SD_CS: u8 = 23;
-    pub const BUZZER: u8 = 28;
-    pub const NEOPIXEL: u8 = 4;
-    pub const EJECT_BUTTON: u8 = 24;
-    pub const ADXL_INT1: u8 = 5;
-    pub const ADXL_INT2: u8 = 6;
-    pub const LSM_INT1: u8 = 9;
-    pub const LSM_INT2: u8 = 10;
-    pub const LIS3_INT1: u8 = 11;
-    pub const LIS3_INT2: u8 = 12;
-    pub const BMP_INT: u8 = 13;
-    pub const SERVO_XPLUS: u8 = 25;
-    pub const SERVO_XMINUS: u8 = 14;
-    pub const SERVO_YPLUS: u8 = 15;
-    pub const SERVO_YMINUS: u8 = 8;
-    pub const BATTERY_VOLTAGE: u8 = 29;
-    pub const TURN_SIGNAL_LEFT: u8 = 26;
-    pub const TURN_SIGNAL_RIGHT: u8 = 27;
+#[cfg(feature = "hw-v2")]
+pub mod board {
+    /// Adafruit Feather RP2040 Adalogger's external high-speed crystal is 12 MHz
+    pub const XTAL_FREQ_HZ: u32 = 12_000_000;
+
+    use embassy_rp::Peri;
+    use embassy_rp::peripherals::*;
+
+    define_hardware!(AvionicsHardware {
+        i2c: I2cConfig {
+            bus: I2C0,
+            sda: PIN_2,
+            scl: PIN_3,
+        },
+        uart: UartConfig {
+            rx: PIN_1,
+            tx: PIN_0,
+        },
+        sd: SdConfig {
+            sclk: PIN_18,
+            mosi: PIN_19,
+            miso: PIN_20,
+            data1: PIN_21,
+            data2: PIN_22,
+            cs: PIN_23,
+            detect: PIN_16,
+        },
+        interrupts: InterruptConfig {
+            adxl_int1: PIN_5,
+            adxl_int2: PIN_6,
+            lsm_int1: PIN_9,
+            lsm_int2: PIN_10,
+            lis3_int1: PIN_11,
+            lis3_int2: PIN_12,
+            bmp_int: PIN_13,
+        },
+        peripherals: PeripheralConfig {
+            neopixel: PIN_4,
+            buzzer: PIN_28,
+            eject_button: PIN_24,
+            battery_voltage: PIN_29,
+            turn_signal_left: PIN_26,
+            turn_signal_right: PIN_27,
+        },
+        servos: ServoConfig {
+            xplus: PIN_25,
+            xminus: PIN_14,
+            yplus: PIN_15,
+            yminus: PIN_8,
+        },
+    });
 }

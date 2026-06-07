@@ -13,12 +13,24 @@
 
 extern crate uom;
 
+use defmt::*;
 use defmt_rtt as _;
+use embedded_hal::digital::OutputPin;
 use panic_probe as _;
 
 use embassy_executor::{Executor, SpawnError, SpawnToken};
 use embassy_rp::multicore::{spawn_core1, Stack};
 use static_cell::StaticCell;
+
+use embassy_rp::{bind_interrupts, Peri, Peripherals};
+use embassy_rp::i2c;
+use defmt::*;
+use embassy_executor::Spawner;
+use embassy_rp::peripherals::I2C0;
+use embassy_time::Timer;
+use embedded_hal_async::i2c::I2c;
+use {defmt_rtt as _, panic_probe as _};
+use crate::config::board::{AvionicsHardware, I2cConfig, InterruptConfig, PeripheralConfig, SdConfig, UartConfig};
 
 mod ahrs;
 mod config;
@@ -37,27 +49,33 @@ mod types;
 #[unsafe(link_section = ".core1_stack")]
 static mut CORE1_STACK: Stack<4096> = Stack::new();
 
+// Bind the interrupt handler with the peripheral
+bind_interrupts!(struct Irqs {
+    I2C0_IRQ => i2c::InterruptHandler<I2C0>;
+});
+
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
-#[cortex_m_rt::entry]
-fn main() -> ! {
+#[embassy_executor::main]
+async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
+    let hw = take_hardware!(p);
 
     // Spawn core 1's executor first so it's ready to receive packets the
     // moment core 0 starts producing them.
     spawn_core1(p.CORE1, unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) }, move || {
-        spawn_core(EXECUTOR1.init(Executor::new()), core1_main())
+        spawn_core(EXECUTOR1.init(Executor::new()), core1_main(hw.sd, hw.uart))
     });
 
-    spawn_core(EXECUTOR0.init(Executor::new()), core0_main())
+    spawn_core(EXECUTOR0.init(Executor::new()), core0_main(hw.i2c, hw.interrupts, hw.peripherals));
 }
 
 fn spawn_core(executor: &'static mut Executor, core_main: Result<SpawnToken<impl Sized>, SpawnError>) -> ! {
     executor.run(|spawner| {
         let core2_task = core_main.unwrap_or_else(|e| {
-            defmt::error!("core 1: failed to spawn task: {:?}", e);
-            panic!("core 1 task spawn failed");
+            error!("core 1: failed to spawn task: {:?}", e);
+            defmt::panic!("core 1 task spawn failed");
         });
 
         spawner.spawn(core2_task);
@@ -66,8 +84,15 @@ fn spawn_core(executor: &'static mut Executor, core_main: Result<SpawnToken<impl
 
 /// Core 0: the avionics hot loop. Skeleton — tasks below are TODOs.
 #[embassy_executor::task]
-async fn core0_main() {
-    defmt::info!("core 0: avionics task starting");
+async fn core0_main(i2c_config: I2cConfig, interrupt_config: InterruptConfig, peripheral_config: PeripheralConfig) {
+    info!("core 0: avionics task starting");
+
+    info!("initializing I²C bus");
+    let mut config = i2c::Config::default();
+    config.frequency = 400_000;
+    let mut i2c = i2c::I2c::new_async(i2c_config.bus, i2c_config.scl, i2c_config.sda, Irqs, config);
+    // i2c.write(0x76u8, &[1, 2, 3]).await.unwrap();
+    info!("I²C bus initialized");
     // TODO (in this order, matching original `setup()`):
     //   1. init I²C bus (Wire), set 400 kHz fast mode
     //   2. init NeoPixel, buzzer, eject-button GPIO
@@ -77,19 +102,19 @@ async fn core0_main() {
     //   6. transition state machine: Starting -> ReadyToLaunch
     //   7. enter sample/update/control ticker @ ~200 Hz
     loop {
-        embassy_time::Timer::after_millis(1000).await;
+        Timer::after_millis(1000).await;
     }
 }
 
 /// Core 1: I/O background. Owns SD card + GPS UART + indicators.
 #[embassy_executor::task]
-async fn core1_main() {
-    defmt::info!("core 1: I/O task starting");
+async fn core1_main(sd_config: SdConfig, uart_config: UartConfig) {
+    info!("core 1: I/O task starting");
     // TODO:
     //   • init SD card (SPI1 @ 50 MHz, embedded-sdmmc::VolumeManager)
     //   • init UART1 for GPS @ 9600 baud, send PMTK config
     //   • spawn `sd_writer_task`, `gps_task`, `indicator_task`
     loop {
-        embassy_time::Timer::after_millis(1000).await;
+        Timer::after_millis(1000).await;
     }
 }

@@ -1,5 +1,7 @@
 # Rust + Embassy port — porting plan
 
+think about https://gemini.google.com/share/bd9823a12fad
+
 The existing C++/Arduino firmware in the repo root (~2,600 LOC, last flew
 2026-05-17) is the source of truth. This subdirectory holds the in-progress
 Rust port that will eventually replace it on the new RP2350 PCB. The C++ keeps
