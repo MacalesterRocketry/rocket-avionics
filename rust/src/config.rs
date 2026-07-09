@@ -26,6 +26,7 @@ pub const SYNC_INTERVAL_MS: u64 = 5_000;
 
 pub const USE_GPS: bool = true;
 pub const USE_TURN_SIGNALS: bool = true;
+pub const HAS_DROGUE_CHUTE: bool = true;
 
 // ───────────────────────────── physical constants ───────────────────────────
 /// North Branch, MN local gravity (m/s²).
@@ -133,11 +134,13 @@ macro_rules! define_hardware {
 
 #[cfg(feature = "hw-v3")]
 pub mod board {
-    /// External high-speed crystal on the Metro RP2350 board is 12 MHz, as with most RP2350 boards
-    pub(crate) const XTAL_FREQ_HZ: u32 = 12_000_000u32;
-
     use embassy_rp::Peri;
     use embassy_rp::peripherals::*;
+
+    /// External high-speed crystal on the Metro RP2350 board is 12 MHz, as with most RP2350 boards
+    pub(crate) const XTAL_FREQ_HZ: u32 = 12_000_000u32;
+    pub(crate) const NUM_LEDS: usize = 1;
+    pub type NeopixelColorOrder = embassy_rp::pio_programs::ws2812::Grb;
 
     // Now you map logical names to physical pins exactly once.
     // To add a pin, just add one line here.
@@ -169,8 +172,12 @@ pub mod board {
             lis3_int2: PIN_12,
             bmp_int: PIN_13,
         },
+        neopixel: NeopixelConfig {
+            pin: PIN_25,
+            pio: PIO0,
+            channel: DMA_CH0,
+        },
         peripherals: PeripheralConfig {
-            neopixel: PIN_25,
             buzzer: PIN_43,
             eject_button: PIN_24,
         },
@@ -181,6 +188,8 @@ pub mod board {
 pub mod board {
     /// Adafruit Feather RP2040 Adalogger's external high-speed crystal is 12 MHz
     pub const XTAL_FREQ_HZ: u32 = 12_000_000;
+    pub(crate) const NUM_LEDS: usize = 1;
+    pub type NeopixelColorOrder = embassy_rp::pio_programs::ws2812::Grb;
 
     use embassy_rp::Peri;
     use embassy_rp::peripherals::*;

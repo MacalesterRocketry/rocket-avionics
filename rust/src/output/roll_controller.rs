@@ -7,8 +7,10 @@
 
 #![allow(dead_code, unused_variables)]
 
+use embassy_time::Duration;
 use crate::config::{MOMENT_OF_INERTIA, ROLL_PID_KD, ROLL_PID_KI, ROLL_PID_KP, TORQUE_PER_DEG_50MS};
 use crate::math::{Deg, Quat, Vec3};
+use crate::orientation::ahrs::AhrsState;
 
 /// Fin effectiveness (N·m per degree) at a given airspeed. Linear-in-deflection
 /// approximation, quadratic-in-velocity. Matches `calculate_effectiveness`.
@@ -23,19 +25,29 @@ pub fn effectiveness(velocity_earth: Vec3) -> f64 {
 #[derive(Default, Debug, Clone, Copy)]
 pub struct RollPid {
     pub integral: f64,
+    initial_orientation: Quat,
 }
 
 impl RollPid {
+    pub fn default() -> Self {
+        Self {
+            integral: 0.0,
+            initial_orientation: Quat::IDENTITY,
+        }
+    }
+    
+    pub fn launch(&mut self, ahrs: AhrsState) {
+        self.initial_orientation = ahrs.q;
+    }
+    
     /// Returns fin deflection (deg). Returns 0 when effectiveness is too low
     /// to authoritatively command — same guard as the C++ version.
     /// TODO: port full body once `crate::ahrs::AhrsState` is wired in.
     pub fn step(
         &mut self,
-        _q_current: Quat,
-        _q_target: Quat,
-        _angular_velocity_body: Vec3,
-        _velocity_earth: Vec3,
-        _dt: f64,
+        desired_angle: Deg,
+        ahrs: AhrsState,
+        dt: Duration,
     ) -> Deg {
         0.0
     }

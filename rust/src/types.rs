@@ -3,6 +3,12 @@
 
 use crate::math::Vec3;
 use bitflags::bitflags;
+use embassy_rp::pio;
+use embassy_rp::pio_programs::ws2812::{PioWs2812, RgbColorOrder};
+use embassy_time::Instant;
+use crate::config::board::NUM_LEDS;
+use crate::orientation::ahrs::AhrsState;
+use crate::output::roll_controller::RollPid;
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct LsmReading {
@@ -42,19 +48,6 @@ pub struct SensorReadings {
 }
 
 // ────────────────────────── state machine / events ──────────────────────────
-/// Discriminants MUST match the C++ enum: decoder.py reads these raw bytes.
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SystemState {
-    Starting = 0,
-    ReadyToLaunch = 1,
-    Ascent = 2,
-    Error = 3,
-    Warning = 4,
-    FileClosed = 5,
-    Irrelevant = 255,
-}
-
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventType {

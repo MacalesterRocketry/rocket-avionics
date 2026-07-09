@@ -18,7 +18,7 @@ bench = false
 [dependencies]
 # Embassy core. RP2350A = "rp235xa" feature (40-pin, like Pico 2 / Feather RP2350).
 # Switch to "rp235xb" if you spin a board around the larger RP2350B (QFN-80).
-embassy-rp        = { version = "0.10.0", features = ["rp235xb", "time-driver", "critical-section-impl", "binary-info", "rt", "unstable-pac", "defmt", "rom-v2-intrinsics"] }
+embassy-rp        = { version = "0.10", features = ["rp235xb", "time-driver", "critical-section-impl", "binary-info", "rt", "unstable-pac", "defmt", "rom-v2-intrinsics"] }
 embassy-executor  = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "defmt"] }
 embassy-time      = { version = "0.5", features = ["defmt", "defmt-timestamp-uptime"] }
 embassy-sync      = { version = "0.8", features = ["defmt"] }
@@ -55,9 +55,8 @@ static_cell = "2.1"
 uom = { version = "0.38", default-features = false, features = [ "f64", "si" ] }
 num-traits = { version = "0.2", default-features = false, features = [ "libm" ] }
 
-# WS2812 Neopixel support for indication
-# depends on rp2040-hal, which causes problems; fork? find a different library?
-#ws2812-pio = "0.9.0"
+# Helper for writing to the WS2812 indicator LED
+smart-leds = "0.4.0"
 
 # SD card over SPI. embedded-sdmmc supports FAT16/32 and is the de-facto choice.
 embedded-sdmmc = { version = "0.9", default-features = false, features = ["defmt-log"] }
@@ -75,7 +74,8 @@ heapless = { version = "0.9", features = ["defmt"] }
 lsm6dsox  = { version = "2.1", optional = true }   # gyro + low-G accel
 lis3mdl   = { version = "0.1", optional = true }   # magnetometer TODO: fork and improve the driver, it's not great
 bmp390-rs = { version = "0.4", optional = true }   # barometer and temperature sensor
-# TODO: Add ADXL375 crate, maybe https://crates.io/crates/adxl343?
+# TODO: Add ADXL375 crate, maybe https://crates.io/crates/adxl343 or https://crates.io/crates/adxl345-eh-driver?
+adxl343 = "0.8.0"
 
 [features]
 default = ["sensors", "hw-v3"]

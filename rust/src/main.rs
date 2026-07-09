@@ -13,6 +13,8 @@
 
 extern crate uom;
 
+use adxl343::accelerometer::RawAccelerometer;
+use adxl343::Adxl343;
 use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::OutputPin;
@@ -22,17 +24,26 @@ use embassy_executor::{Executor, SpawnError, SpawnToken};
 use embassy_rp::multicore::{spawn_core1, Stack};
 use static_cell::StaticCell;
 
-use embassy_rp::{bind_interrupts, Peri, Peripherals};
-use embassy_rp::i2c;
+use crate::config::board::{
+    AvionicsHardware, I2cConfig, InterruptConfig, NeopixelConfig, PeripheralConfig, SdConfig,
+    UartConfig,
+};
+use crate::math::Vec3;
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_rp::peripherals::I2C0;
+use embassy_rp::gpio::{Input, Output};
+use embassy_rp::i2c;
+use embassy_rp::peripherals::{DMA_CH0, I2C0, PIO0};
+use embassy_rp::pio::Pio;
+use embassy_rp::pio_programs::ws2812::{PioWs2812, PioWs2812Program};
+use embassy_rp::{bind_interrupts, dma, pio, pio_programs, Peri, Peripherals};
 use embassy_time::Timer;
 use embedded_hal_async::i2c::I2c;
+use smart_leds::hsv::{hsv2rgb, Hsv};
+use smart_leds::{RGB8, RGBA};
 use {defmt_rtt as _, panic_probe as _};
-use crate::config::board::{AvionicsHardware, I2cConfig, InterruptConfig, PeripheralConfig, SdConfig, UartConfig};
+use crate::state::SystemState;
 
-mod ahrs;
 mod config;
 mod log_packets;
 mod math;
@@ -52,6 +63,8 @@ static mut CORE1_STACK: Stack<4096> = Stack::new();
 // Bind the interrupt handler with the peripheral
 bind_interrupts!(struct Irqs {
     I2C0_IRQ => i2c::InterruptHandler<I2C0>;
+    PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
+    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>;
 });
 
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
@@ -64,14 +77,22 @@ async fn main(_spawner: Spawner) {
 
     // Spawn core 1's executor first so it's ready to receive packets the
     // moment core 0 starts producing them.
-    spawn_core1(p.CORE1, unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) }, move || {
-        spawn_core(EXECUTOR1.init(Executor::new()), core1_main(hw.sd, hw.uart))
-    });
+    spawn_core1(
+        p.CORE1,
+        unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
+        move || spawn_core(EXECUTOR1.init(Executor::new()), core1_main(hw.sd, hw.uart)),
+    );
 
-    spawn_core(EXECUTOR0.init(Executor::new()), core0_main(hw.i2c, hw.interrupts, hw.peripherals));
+    spawn_core(
+        EXECUTOR0.init(Executor::new()),
+        core0_main(hw.i2c, hw.interrupts, hw.peripherals, hw.neopixel),
+    );
 }
 
-fn spawn_core(executor: &'static mut Executor, core_main: Result<SpawnToken<impl Sized>, SpawnError>) -> ! {
+fn spawn_core(
+    executor: &'static mut Executor,
+    core_main: Result<SpawnToken<impl Sized>, SpawnError>,
+) -> ! {
     executor.run(|spawner| {
         let core2_task = core_main.unwrap_or_else(|e| {
             error!("core 1: failed to spawn task: {:?}", e);
@@ -84,7 +105,12 @@ fn spawn_core(executor: &'static mut Executor, core_main: Result<SpawnToken<impl
 
 /// Core 0: the avionics hot loop. Skeleton — tasks below are TODOs.
 #[embassy_executor::task]
-async fn core0_main(i2c_config: I2cConfig, interrupt_config: InterruptConfig, peripheral_config: PeripheralConfig) {
+async fn core0_main(
+    i2c_config: I2cConfig,
+    interrupt_config: InterruptConfig,
+    peripheral_config: PeripheralConfig,
+    neopixel_config: NeopixelConfig,
+) {
     info!("core 0: avionics task starting");
 
     info!("initializing I²C bus");
@@ -93,6 +119,34 @@ async fn core0_main(i2c_config: I2cConfig, interrupt_config: InterruptConfig, pe
     let mut i2c = i2c::I2c::new_async(i2c_config.bus, i2c_config.scl, i2c_config.sda, Irqs, config);
     // i2c.write(0x76u8, &[1, 2, 3]).await.unwrap();
     info!("I²C bus initialized");
+
+    info!("initializing GPIO");
+    let mut buzzer = Output::new(peripheral_config.buzzer, embassy_rp::gpio::Level::Low);
+    buzzer.set_low();
+    let mut eject_button = Input::new(peripheral_config.eject_button, embassy_rp::gpio::Pull::Up);
+
+    info!("initializing NeoPixel");
+    let Pio {
+        mut common, sm0, ..
+    } = Pio::new(neopixel_config.pio, Irqs);
+    let program = PioWs2812Program::new(&mut common);
+    let neopixel = PioWs2812::new(
+                &mut common,
+                sm0,
+                neopixel_config.channel,
+                Irqs,
+                neopixel_config.pin,
+                &program,
+            );
+    info!("NeoPixel initialized");
+
+    info!("initializing system state");
+    let mut system = SystemState::new(neopixel);
+    info!("system state initialized");
+
+    info!("initializing sensors");
+    let mut accel = Adxl343::new(i2c).unwrap();
+    info!("accelerometer initialized");
     // TODO (in this order, matching original `setup()`):
     //   1. init I²C bus (Wire), set 400 kHz fast mode
     //   2. init NeoPixel, buzzer, eject-button GPIO
@@ -102,7 +156,17 @@ async fn core0_main(i2c_config: I2cConfig, interrupt_config: InterruptConfig, pe
     //   6. transition state machine: Starting -> ReadyToLaunch
     //   7. enter sample/update/control ticker @ ~200 Hz
     loop {
-        Timer::after_millis(1000).await;
+        system.tick().await;
+        let test = accel.accel_raw().unwrap();
+        info!("raw accel: {=i16}, {=i16}, {=i16}", test.x, test.y, test.z);
+        let scale = 0.049;
+        let raw_accel = Vec3::new(
+            test.x as f64 * scale,
+            test.y as f64 * scale,
+            test.z as f64 * scale,
+        );
+        info!("{=f64}m/s² X, {=f64}m/s² Y, {=f64}m/s² Z", raw_accel.x, raw_accel.y, raw_accel.z);
+        Timer::after_millis(5).await;
     }
 }
 

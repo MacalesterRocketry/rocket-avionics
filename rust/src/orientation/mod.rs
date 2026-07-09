@@ -3,3 +3,4 @@
 //! at crate root (`crate::ahrs`).
 
 pub mod gps;
+pub mod ahrs;

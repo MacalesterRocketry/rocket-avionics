@@ -63,6 +63,7 @@ pub struct AhrsState {
     pub velocity_earth: Vec3,
     pub position_earth: Vec3,
     pub angular_velocity_body: Vec3,
+    in_flight: bool,
 }
 
 impl Default for AhrsState {
@@ -74,6 +75,7 @@ impl Default for AhrsState {
             velocity_earth: Vec3::ZERO,
             position_earth: Vec3::ZERO,
             angular_velocity_body: Vec3::ZERO,
+            in_flight: false,
         }
     }
 }
@@ -82,7 +84,7 @@ impl AhrsState {
     /// One AHRS step. `in_flight=true` disables gravity-based accel correction
     /// (in C++ this skips the Madgwick step entirely during burn/coast).
     /// TODO: port full update logic — see `ahrs.cpp::update_ahrs`.
-    pub fn update(&mut self, _gyro: Vec3, _accel: Vec3, _mag: Vec3, _now_us: u64, _in_flight: bool) {
+    pub fn update(&mut self, _gyro: Vec3, _accel: Vec3, _mag: Vec3, _now: embassy_time::Instant) {
         // Stub. Will integrate:
         //   1. dt = (now - last) / 1e6, skip if dt ∉ (0, 0.1)
         //   2. q1 = q0 ⊗ Δq_gyro
@@ -91,6 +93,14 @@ impl AhrsState {
         //   5. q4 = normalize(q3)
         //   6. earth-frame accel = R(q4)·accel − [0,0,G]
         //   7. integrate velocity, position
+    }
+
+    pub fn launch(&mut self) {
+        self.in_flight = true;
+    }
+
+    pub fn landing(&mut self) {
+        self.in_flight = false;
     }
 
     pub fn zero_pos_vel(&mut self) {
