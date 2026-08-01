@@ -90,8 +90,8 @@ impl<'a, PioInstance: pio::Instance, ColorOrder: RgbColorOrder> SystemState<'a, 
     pub fn new(neopixel: PioWs2812<'a, PioInstance, 0, { NUM_LEDS }, ColorOrder>) -> Self {
         Self {
             state: FlightState::PreLaunch(GroundSubState::Startup),
-            ahrs: ahrs::AhrsState::default(),
-            roll_pid: roll_controller::RollPid::default(),
+            ahrs: AhrsState::default(),
+            roll_pid: RollPid::default(),
             neopixel,
             ignition_time: None,
             last_tick: Instant::now(),
@@ -100,7 +100,6 @@ impl<'a, PioInstance: pio::Instance, ColorOrder: RgbColorOrder> SystemState<'a, 
 
     /// The main loop tick
     pub async fn tick(&mut self) {
-        // --- 1. GLOBAL ACTIONS (Runs in ALL flight conditions) ---
         let now = Instant::now();
         let tick_time = now - self.last_tick;
         self.last_tick = now;

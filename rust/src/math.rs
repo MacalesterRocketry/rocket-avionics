@@ -85,6 +85,84 @@ impl Vec3 {
     }
 }
 
+impl From<nalgebra::Vector3<f64>> for Vec3 {
+    #[inline]
+    fn from(v: nalgebra::Vector3<f64>) -> Self {
+        Self { x: v.x, y: v.y, z: v.z }
+    }
+}
+impl From<Vec3> for nalgebra::Vector3<f64> {
+    #[inline]
+    fn from(v: Vec3) -> Self {
+        nalgebra::Vector3::new(v.x, v.y, v.z)
+    }
+}
+
+impl From<[f64; 3]> for Vec3 {
+    #[inline]
+    fn from(a: [f64; 3]) -> Self {
+        Self { x: a[0], y: a[1], z: a[2] }
+    }
+}
+impl From<Vec3> for [f64; 3] {
+    #[inline]
+    fn from(v: Vec3) -> Self {
+        [v.x, v.y, v.z]
+    }
+}
+
+impl From<[f32; 3]> for Vec3 {
+    #[inline]
+    fn from(a: [f32; 3]) -> Self {
+        Self { x: a[0] as f64, y: a[1] as f64, z: a[2] as f64 }
+    }
+}
+impl From<Vec3> for [f32; 3] {
+    #[inline]
+    fn from(v: Vec3) -> Self {
+        [v.x as f32, v.y as f32, v.z as f32]
+    }
+}
+
+impl From<(f64, f64, f64)> for Vec3 {
+    #[inline]
+    fn from(a: (f64, f64, f64)) -> Self {
+        Self { x: a.0, y: a.1, z: a.2 }
+    }
+}
+impl From<Vec3> for (f64, f64, f64) {
+    #[inline]
+    fn from(v: Vec3) -> Self {
+        (v.x, v.y, v.z)
+    }
+}
+
+impl From<(f32, f32, f32)> for Vec3 {
+    #[inline]
+    fn from(a: (f32, f32, f32)) -> Self {
+        Self { x: a.0 as f64, y: a.1 as f64, z: a.2 as f64 }
+    }
+}
+impl From<Vec3> for (f32, f32, f32) {
+    #[inline]
+    fn from(v: Vec3) -> Self {
+        (v.x as f32, v.y as f32, v.z as f32)
+    }
+}
+
+impl From<(i16, i16, i16)> for Vec3 {
+    #[inline]
+    fn from(a: (i16, i16, i16)) -> Self {
+        Self { x: a.0 as f64, y: a.1 as f64, z: a.2 as f64 }
+    }
+}
+impl From<Vec3> for (i16, i16, i16) {
+    #[inline]
+    fn from(v: Vec3) -> Self {
+        (v.x as i16, v.y as i16, v.z as i16)
+    }
+}
+
 // Scalar ops
 impl Mul<f64> for Vec3 {
     type Output = Vec3;
@@ -246,6 +324,25 @@ impl Mul<Quat> for Quat {
             p.w * q.y - p.x * q.z + p.y * q.w + p.z * q.x,
             p.w * q.z + p.x * q.y - p.y * q.x + p.z * q.w,
         )
+    }
+}
+
+impl From<nalgebra::Quaternion<f64>> for Quat {
+    #[inline]
+    fn from(q: nalgebra::Quaternion<f64>) -> Self {
+        Self {
+            w: q.w,
+            x: q.i,
+            y: q.j,
+            z: q.k,
+        }
+    }
+}
+
+impl From<Quat> for nalgebra::Quaternion<f64> {
+    #[inline]
+    fn from(q: Quat) -> Self {
+        nalgebra::Quaternion::new(q.w, q.x, q.y, q.z)
     }
 }
 

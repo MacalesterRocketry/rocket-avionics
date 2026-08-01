@@ -13,8 +13,6 @@
 
 extern crate uom;
 
-use adxl343::accelerometer::RawAccelerometer;
-use adxl343::Adxl343;
 use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::OutputPin;
@@ -37,12 +35,14 @@ use embassy_rp::peripherals::{DMA_CH0, I2C0, PIO0};
 use embassy_rp::pio::Pio;
 use embassy_rp::pio_programs::ws2812::{PioWs2812, PioWs2812Program};
 use embassy_rp::{bind_interrupts, dma, pio, pio_programs, Peri, Peripherals};
-use embassy_time::Timer;
+use embassy_time::{Duration, Instant, Timer};
 use embedded_hal_async::i2c::I2c;
 use smart_leds::hsv::{hsv2rgb, Hsv};
 use smart_leds::{RGB8, RGBA};
 use {defmt_rtt as _, panic_probe as _};
+use crate::config::G;
 use crate::state::SystemState;
+use adxl3xx;
 
 mod config;
 mod log_packets;
@@ -145,7 +145,25 @@ async fn core0_main(
     info!("system state initialized");
 
     info!("initializing sensors");
-    let mut accel = Adxl343::new(i2c).unwrap();
+    let adxlbus = adxl3xx::AdxlBusI2c {
+       i2c,
+       addr: adxl3xx::reg::ADXL_ADDR,
+    };
+    let mut adxl = adxl3xx::Adxl375::new(adxlbus).unwrap();
+    //     Ok(device) => device,
+    //     Err(e) => {
+    //         error!("Error initializing ADXL375");
+    //         return;
+    //     }
+    // };
+    if let Err(e) = adxl.init_defaults() {
+        error!("Error initializing ADXL375");
+        return;
+    }
+    if let Err(e) = adxl.calibrate_axis_offsets() {
+        error!("Error calibrating ADXL375");
+        return;
+    }
     info!("accelerometer initialized");
     // TODO (in this order, matching original `setup()`):
     //   1. init I²C bus (Wire), set 400 kHz fast mode
@@ -157,15 +175,11 @@ async fn core0_main(
     //   7. enter sample/update/control ticker @ ~200 Hz
     loop {
         system.tick().await;
-        let test = accel.accel_raw().unwrap();
-        info!("raw accel: {=i16}, {=i16}, {=i16}", test.x, test.y, test.z);
-        let scale = 0.049;
-        let raw_accel = Vec3::new(
-            test.x as f64 * scale,
-            test.y as f64 * scale,
-            test.z as f64 * scale,
-        );
-        info!("{=f64}m/s² X, {=f64}m/s² Y, {=f64}m/s² Z", raw_accel.x, raw_accel.y, raw_accel.z);
+        let accel_lsb: Vec3 = adxl.read_axis_lsb_units().unwrap().into();
+        let accel_g: Vec3 = adxl.read_axis().unwrap().into();
+
+        info!("{=f64}m/s² X, {=f64}m/s² Y, {=f64}m/s² Z", accel_g.x, accel_g.y, accel_g.z);
+        // info!("{=f64}lsb X, {=f64}lsb Y, {=f64}msb Z", accel_lsb.x, accel_lsb.y, accel_lsb.z);
         Timer::after_millis(5).await;
     }
 }
