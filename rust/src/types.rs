@@ -29,7 +29,7 @@ pub struct Lis3Reading {
 #[derive(Default, Debug, Clone, Copy)]
 pub struct AdxlReading {
     /// Body-frame high-G acceleration (m/s²), bias-subtracted.
-    pub highg_accel: Vec3,
+    pub accel: Vec3,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -45,6 +45,28 @@ pub struct SensorReadings {
     pub lis3: Lis3Reading,
     pub adxl: AdxlReading,
     pub bmp: BmpReading,
+}
+
+impl SensorReadings {
+    /// Best-available acceleration for AHRS input: the low-G accel, unless
+    /// it's saturated, in which case fall back to the high-G accelerometer.
+    /// Mirrors the switch in `states.cpp`'s `STATE_ASCENT` handler.
+    pub fn merged_accel(&self) -> Vec3 {
+        let lowg = self.lsm.accel;
+        if lowg.mag() >= crate::config::ACCELEROMETER_SWITCH_THRESHOLD {
+            self.adxl.accel
+        } else {
+            lowg
+        }
+    }
+
+    /// True once the high-G accelerometer has recorded a launch-magnitude
+    /// acceleration spike. Mirrors `hasLaunched()` in the C++ source (the
+    /// interrupt-based detector is wired but currently bypassed in favor of
+    /// a plain magnitude check).
+    pub fn has_launched(&self) -> bool {
+        self.adxl.accel.mag() >= crate::config::LAUNCH_ACCEL_THRESHOLD_G * crate::config::G
+    }
 }
 
 // ────────────────────────── state machine / events ──────────────────────────

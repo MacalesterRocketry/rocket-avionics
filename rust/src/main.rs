@@ -26,7 +26,6 @@ use crate::config::board::{
     AvionicsHardware, I2cConfig, InterruptConfig, NeopixelConfig, PeripheralConfig, SdConfig,
     UartConfig,
 };
-use crate::math::Vec3;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_rp::gpio::{Input, Output};
@@ -42,7 +41,6 @@ use smart_leds::{RGB8, RGBA};
 use {defmt_rtt as _, panic_probe as _};
 use crate::config::G;
 use crate::state::SystemState;
-use adxl3xx;
 
 mod config;
 mod log_packets;
@@ -140,46 +138,26 @@ async fn core0_main(
             );
     info!("NeoPixel initialized");
 
+    info!("initializing sensors");
+    let sensors = match sensors::init_all(i2c) {
+        Ok(sensors) => sensors,
+        Err(e) => {
+            error!("Error initializing sensors: {:?}", defmt::Debug2Format(&e));
+            return;
+        }
+    };
+    info!("sensors initialized");
+
     info!("initializing system state");
-    let mut system = SystemState::new(neopixel);
+    let mut system = SystemState::new(neopixel, sensors);
     info!("system state initialized");
 
-    info!("initializing sensors");
-    let adxlbus = adxl3xx::AdxlBusI2c {
-       i2c,
-       addr: adxl3xx::reg::ADXL_ADDR,
-    };
-    let mut adxl = adxl3xx::Adxl375::new(adxlbus).unwrap();
-    //     Ok(device) => device,
-    //     Err(e) => {
-    //         error!("Error initializing ADXL375");
-    //         return;
-    //     }
-    // };
-    if let Err(e) = adxl.init_defaults() {
-        error!("Error initializing ADXL375");
-        return;
-    }
-    if let Err(e) = adxl.calibrate_axis_offsets() {
-        error!("Error calibrating ADXL375");
-        return;
-    }
-    info!("accelerometer initialized");
     // TODO (in this order, matching original `setup()`):
-    //   1. init I²C bus (Wire), set 400 kHz fast mode
-    //   2. init NeoPixel, buzzer, eject-button GPIO
-    //   3. init all four sensors (sensors::init_all)
-    //   4. init servo PWMs
-    //   5. start AHRS state (record start time)
-    //   6. transition state machine: Starting -> ReadyToLaunch
-    //   7. enter sample/update/control ticker @ ~200 Hz
+    //   1. init servo PWMs
+    //   2. start AHRS state (record start time)
+    //   3. transition state machine: Starting -> ReadyToLaunch
     loop {
         system.tick().await;
-        let accel_lsb: Vec3 = adxl.read_axis_lsb_units().unwrap().into();
-        let accel_g: Vec3 = adxl.read_axis().unwrap().into();
-
-        info!("{=f64}m/s² X, {=f64}m/s² Y, {=f64}m/s² Z", accel_g.x, accel_g.y, accel_g.z);
-        // info!("{=f64}lsb X, {=f64}lsb Y, {=f64}msb Z", accel_lsb.x, accel_lsb.y, accel_lsb.z);
         Timer::after_millis(5).await;
     }
 }

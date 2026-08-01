@@ -16,9 +16,10 @@ use embassy_rp::pio_programs::ws2812::{Grb, PioWs2812, PioWs2812Program, RgbColo
 use embassy_time::{Duration, Instant};
 use smart_leds::hsv::{hsv2rgb, Hsv};
 use smart_leds::RGB8;
-use crate::config::{ACCELEROMETER_SWITCH_THRESHOLD, HAS_DROGUE_CHUTE};
-use crate::math::{Deg, Vec3};
-use crate::{sensors, Irqs};
+use crate::config::HAS_DROGUE_CHUTE;
+use crate::math::Deg;
+use crate::Irqs;
+use crate::sensors::Sensors;
 use crate::config::board::{NeopixelColorOrder, NeopixelConfig, NUM_LEDS};
 use crate::types::SensorReadings;
 use crate::orientation::ahrs;
@@ -26,11 +27,12 @@ use crate::orientation::ahrs::AhrsState;
 use crate::output::roll_controller;
 use crate::output::roll_controller::RollPid;
 
-pub struct SystemState<'a, PioInstance: pio::Instance, ColorOrder: RgbColorOrder> {
+pub struct SystemState<'a, PioInstance: pio::Instance, ColorOrder: RgbColorOrder, I2C: embedded_hal::i2c::I2c> {
     pub state: FlightState,
     pub ahrs: AhrsState,
     pub roll_pid: RollPid,
     pub neopixel: PioWs2812<'a, PioInstance, 0, { NUM_LEDS }, ColorOrder>,
+    pub sensors: Sensors<I2C>,
     pub(crate) ignition_time: Option<Instant>,
     pub(crate) last_tick: Instant,
     // pub last_event: Option<EventType>, // who knows, these last three are just ideas about what might be interesting to have
@@ -86,13 +88,14 @@ pub struct StateIndicator {
     pub buzzer: BeepCode,
 }
 
-impl<'a, PioInstance: pio::Instance, ColorOrder: RgbColorOrder> SystemState<'a, PioInstance, ColorOrder> {
-    pub fn new(neopixel: PioWs2812<'a, PioInstance, 0, { NUM_LEDS }, ColorOrder>) -> Self {
+impl<'a, PioInstance: pio::Instance, ColorOrder: RgbColorOrder, I2C: embedded_hal::i2c::I2c> SystemState<'a, PioInstance, ColorOrder, I2C> {
+    pub fn new(neopixel: PioWs2812<'a, PioInstance, 0, { NUM_LEDS }, ColorOrder>, sensors: Sensors<I2C>) -> Self {
         Self {
             state: FlightState::PreLaunch(GroundSubState::Startup),
             ahrs: AhrsState::default(),
             roll_pid: RollPid::default(),
             neopixel,
+            sensors,
             ignition_time: None,
             last_tick: Instant::now(),
         }
@@ -104,12 +107,9 @@ impl<'a, PioInstance: pio::Instance, ColorOrder: RgbColorOrder> SystemState<'a, 
         let tick_time = now - self.last_tick;
         self.last_tick = now;
 
-        let sensor_data = sensors::read_all().await;
+        let sensor_data = self.sensors.read_all().await;
         let gyro = sensor_data.lsm.gyro;
-        let mut accel: Vec3 = sensor_data.lsm.accel;
-        if accel.mag() >= ACCELEROMETER_SWITCH_THRESHOLD { // If the low-G accelerometer is saturated, switch to high-G readings for AHRS
-            accel = sensor_data.adxl.highg_accel;
-        }
+        let accel = sensor_data.merged_accel();
         let mag = sensor_data.lis3.mag;
 
         self.ahrs.update(gyro, accel, mag, now);
@@ -125,7 +125,7 @@ impl<'a, PioInstance: pio::Instance, ColorOrder: RgbColorOrder> SystemState<'a, 
                     self.transition_to(FlightState::PreLaunch(GroundSubState::ReadyToLaunch));
                 }
                 GroundSubState::ReadyToLaunch => {
-                    if sensors::has_launched(sensor_data.adxl.highg_accel.mag()) {
+                    if sensor_data.has_launched() {
                         self.transition_to(FlightState::Ascent(AscentSubState::Burn));
                     }
                 }

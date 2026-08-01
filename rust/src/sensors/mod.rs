@@ -1,11 +1,11 @@
-//! Sensor I/O. Skeleton.
+//! Sensor I/O.
 //!
-//! Each chip lives in its own submodule. The public surface here mirrors the
-//! C++ `orientation/sensors.h` — `read_lsm()`, `read_lis3()`, `read_adxl()`,
-//! `read_bmp()`, plus a combined `read_all()`. In the Rust port these are
-//! `async fn`s driven by `embassy_rp::i2c::I2c` and SPI; the I²C bus is shared
-//! via `embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice` so all four
-//! chips can hang off the same Wire instance like in the C++ original.
+//! Each chip lives in its own submodule as a thin driver wrapper (init + read,
+//! no cross-chip knowledge). `Sensors<I2C>` owns one instance of each and
+//! mirrors the C++ `initSensors()` / `readSensors()` pair via `init_all()` /
+//! `read_all()`. Once more than one chip is wired in, the I²C bus should be
+//! shared via `embassy_embedded_hal::shared_bus`, same as the C++ Wire
+//! instance — see the TODO on `Sensors`.
 
 #![allow(dead_code, unused_variables)]
 
@@ -16,16 +16,31 @@ pub mod lsm6dsox;
 
 use crate::types::SensorReadings;
 
-/// Read all four sensors. Returns biased + axis-corrected readings.
-/// TODO: implement once individual driver wrappers are filled in.
-pub async fn read_all() -> SensorReadings {
-    SensorReadings::default()
+/// Owns every sensor driver instance sharing the I²C bus.
+/// TODO: add lsm/lis3/bmp fields once their drivers are wired in.
+pub struct Sensors<I2C: embedded_hal::i2c::I2c> {
+    pub adxl: adxl375::Adxl<I2C>,
 }
 
-/// Launch detector — magnitude check on the high-G accel. Mirrors the simple
-/// "magnitude ≥ threshold" check from `hasLaunched()` in sensors.cpp (the
-/// interrupt-based detector is wired but currently bypassed).
-pub fn has_launched(highg_accel_mag_mps2: f64) -> bool {
-    const G: f64 = crate::config::G;
-    highg_accel_mag_mps2 >= (crate::config::LAUNCH_ACCEL_THRESHOLD_G * G)
+#[derive(Debug)]
+pub enum InitError {
+    Adxl(adxl375::Error),
+}
+
+/// Bring up every sensor on the shared I²C bus. Mirrors `initSensors()`.
+pub fn init_all<I2C: embedded_hal::i2c::I2c>(i2c: I2C) -> Result<Sensors<I2C>, InitError> {
+    let adxl = adxl375::Adxl::init(i2c).map_err(InitError::Adxl)?;
+    Ok(Sensors { adxl })
+}
+
+impl<I2C: embedded_hal::i2c::I2c> Sensors<I2C> {
+    /// Read all four sensors. Returns biased + axis-corrected readings.
+    /// TODO: lsm/lis3/bmp still return defaults until their drivers land.
+    pub async fn read_all(&mut self) -> SensorReadings {
+        let adxl = self.adxl.read().unwrap_or_else(|_| {
+            defmt::warn!("ADXL375 read failed; using zeroed high-G reading for this tick");
+            Default::default()
+        });
+        SensorReadings { adxl, ..Default::default() }
+    }
 }
