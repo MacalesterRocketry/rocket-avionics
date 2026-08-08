@@ -136,11 +136,13 @@ macro_rules! define_hardware {
 pub mod board {
     use embassy_rp::Peri;
     use embassy_rp::peripherals::*;
+    use embassy_rp::pio_programs::ws2812::PioWs2812;
 
     /// External high-speed crystal on the Metro RP2350 board is 12 MHz, as with most RP2350 boards
     pub(crate) const XTAL_FREQ_HZ: u32 = 12_000_000u32;
     pub(crate) const NUM_LEDS: usize = 1;
     pub type NeopixelColorOrder = embassy_rp::pio_programs::ws2812::Grb;
+    pub type Neopixel = PioWs2812<'static, PIO0, 0, NUM_LEDS, NeopixelColorOrder>;
 
     // Now you map logical names to physical pins exactly once.
     // To add a pin, just add one line here.
@@ -172,13 +174,13 @@ pub mod board {
             lis3_int2: PIN_12,
             bmp_int: PIN_13,
         },
-        neopixel: NeopixelConfig {
-            pin: PIN_25,
-            pio: PIO0,
-            channel: DMA_CH0,
+        indicators: IndicatorsConfig {
+            buzzer: PIN_43,
+            neopixel: PIN_25,
+            neopixel_pio: PIO0,
+            neopixel_channel: DMA_CH0,
         },
         peripherals: PeripheralConfig {
-            buzzer: PIN_43,
             eject_button: PIN_24,
         },
     });

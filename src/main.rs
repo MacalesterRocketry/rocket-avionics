@@ -22,25 +22,26 @@ use embassy_executor::{Executor, SpawnError, SpawnToken};
 use embassy_rp::multicore::{spawn_core1, Stack};
 use static_cell::StaticCell;
 
-use crate::config::board::{
-    AvionicsHardware, I2cConfig, InterruptConfig, NeopixelConfig, PeripheralConfig, SdConfig,
-    UartConfig,
-};
+use crate::config::board::{AvionicsHardware, I2cConfig, IndicatorsConfig, InterruptConfig, Neopixel, PeripheralConfig, SdConfig, UartConfig};
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::i2c;
 use embassy_rp::peripherals::{DMA_CH0, I2C0, PIO0};
 use embassy_rp::pio::Pio;
-use embassy_rp::pio_programs::ws2812::{PioWs2812, PioWs2812Program};
+use embassy_rp::pio_programs::ws2812::{Grb, PioWs2812, PioWs2812Program};
 use embassy_rp::{bind_interrupts, dma, pio, pio_programs, Peri, Peripherals};
-use embassy_time::{Duration, Instant, Timer};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
+use embassy_sync::watch::Watch;
+use embassy_time::{Duration, Instant, Ticker, Timer};
 use embedded_hal_async::i2c::I2c;
 use smart_leds::hsv::{hsv2rgb, Hsv};
 use smart_leds::{RGB8, RGBA};
 use {defmt_rtt as _, panic_probe as _};
 use crate::config::G;
-use crate::state::SystemState;
+use crate::config::board::NUM_LEDS;
+use crate::state::{indicator_loop, FlightState, SystemState};
 
 mod config;
 mod log_packets;
@@ -68,8 +69,13 @@ bind_interrupts!(struct Irqs {
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
+pub static FLIGHT_STATE: Watch<CriticalSectionRawMutex, FlightState, 2> = Watch::new();
+pub static READY: Signal<CriticalSectionRawMutex, ()> = Signal::new();  // core 1 → core 0
+
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
+async fn main(_spawner: Spawner) -> ! {
+    FLIGHT_STATE.sender().send(FlightState::PreLaunch(state::GroundSubState::Startup));
+
     let p = embassy_rp::init(Default::default());
     let hw = take_hardware!(p);
 
@@ -78,26 +84,29 @@ async fn main(_spawner: Spawner) {
     spawn_core1(
         p.CORE1,
         unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
-        move || spawn_core(EXECUTOR1.init(Executor::new()), core1_main(hw.sd, hw.uart)),
+        move || spawn_core(
+            EXECUTOR1.init(Executor::new()),
+            core1_main(hw.sd, hw.uart, hw.indicators)
+        ),
     );
 
     spawn_core(
         EXECUTOR0.init(Executor::new()),
-        core0_main(hw.i2c, hw.interrupts, hw.peripherals, hw.neopixel),
+        core0_main(hw.i2c, hw.interrupts, hw.peripherals),
     );
 }
 
 fn spawn_core(
     executor: &'static mut Executor,
-    core_main: Result<SpawnToken<impl Sized>, SpawnError>,
+    core: Result<SpawnToken<impl Sized>, SpawnError>,
 ) -> ! {
     executor.run(|spawner| {
-        let core2_task = core_main.unwrap_or_else(|e| {
-            error!("core 1: failed to spawn task: {:?}", e);
-            defmt::panic!("core 1 task spawn failed");
+        let task = core.unwrap_or_else(|e| {
+            error!("core: failed to spawn task: {:?}", e);
+            defmt::panic!("core task spawn failed");
         });
 
-        spawner.spawn(core2_task);
+        spawner.spawn(task);
     });
 }
 
@@ -107,36 +116,18 @@ async fn core0_main(
     i2c_config: I2cConfig,
     interrupt_config: InterruptConfig,
     peripheral_config: PeripheralConfig,
-    neopixel_config: NeopixelConfig,
 ) {
     info!("core 0: avionics task starting");
 
     info!("initializing I²C bus");
     let mut config = i2c::Config::default();
     config.frequency = 400_000;
-    let mut i2c = i2c::I2c::new_async(i2c_config.bus, i2c_config.scl, i2c_config.sda, Irqs, config);
-    // i2c.write(0x76u8, &[1, 2, 3]).await.unwrap();
+    let i2c = i2c::I2c::new_async(i2c_config.bus, i2c_config.scl, i2c_config.sda, Irqs, config);
     info!("I²C bus initialized");
 
     info!("initializing GPIO");
-    let mut buzzer = Output::new(peripheral_config.buzzer, embassy_rp::gpio::Level::Low);
-    buzzer.set_low();
     let mut eject_button = Input::new(peripheral_config.eject_button, embassy_rp::gpio::Pull::Up);
-
-    info!("initializing NeoPixel");
-    let Pio {
-        mut common, sm0, ..
-    } = Pio::new(neopixel_config.pio, Irqs);
-    let program = PioWs2812Program::new(&mut common);
-    let neopixel = PioWs2812::new(
-                &mut common,
-                sm0,
-                neopixel_config.channel,
-                Irqs,
-                neopixel_config.pin,
-                &program,
-            );
-    info!("NeoPixel initialized");
+    info!("GPIO initialized");
 
     info!("initializing sensors");
     let sensors = match sensors::init_all(i2c) {
@@ -149,28 +140,90 @@ async fn core0_main(
     info!("sensors initialized");
 
     info!("initializing system state");
-    let mut system = SystemState::new(neopixel, sensors);
+    let mut system = SystemState::new(sensors).unwrap_or_else(|_| defmt::panic!("Failed to initialize system state"));
+    // TODO: handle errors with Neopixel notifs and logging and stuff instead of panicking
     info!("system state initialized");
 
     // TODO (in this order, matching original `setup()`):
     //   1. init servo PWMs
     //   2. start AHRS state (record start time)
     //   3. transition state machine: Starting -> ReadyToLaunch
+    let mut ticker = Ticker::every(Duration::from_hz(400));
     loop {
+        ticker.next().await;
+        // TODO: I'm wondering if the whole systemState thing should be split out into like 4-ish loops:
+        //  state handling, sensors, AHRS, and PID/servos. I guess state handling would combine all the data?
+        //  Or maybe just extract PID/servos? But tick() should definitely be more tightly integrated
+        //  with the loop and ticker.
         system.tick().await;
-        Timer::after_millis(5).await;
     }
 }
 
 /// Core 1: I/O background. Owns SD card + GPS UART + indicators.
 #[embassy_executor::task]
-async fn core1_main(sd_config: SdConfig, uart_config: UartConfig) {
+async fn core1_main(sd_config: SdConfig,
+                    uart_config: UartConfig,
+                    indicators_config: IndicatorsConfig,
+) {
     info!("core 1: I/O task starting");
+    info!("initializing buzzer");
+    let mut buzzer = Output::new(indicators_config.buzzer, embassy_rp::gpio::Level::Low);
+    buzzer.set_low();
+    info!("buzzer initialized");
+
+    info!("initializing NeoPixel");
+    let Pio {
+        mut common, sm0, ..
+    } = Pio::new(indicators_config.neopixel_pio, Irqs);
+    let program = PioWs2812Program::new(&mut common);
+    let neopixel: Neopixel = PioWs2812::new(
+        &mut common,
+        sm0,
+        indicators_config.neopixel_channel,
+        Irqs,
+        indicators_config.neopixel,
+        &program,
+    );
+    info!("NeoPixel initialized");
+
+    let state_receiver_option = FLIGHT_STATE.receiver();
+    if state_receiver_option.is_none() { // TODO: switch to match
+        defmt::panic!("Failed to get flight state receiver; have too many receivers been initialized?");
+    }
+    let state = state_receiver_option.unwrap();
+
     // TODO:
     //   • init SD card (SPI1 @ 50 MHz, embedded-sdmmc::VolumeManager)
     //   • init UART1 for GPS @ 9600 baud, send PMTK config
-    //   • spawn `sd_writer_task`, `gps_task`, `indicator_task`
+
+
+    READY.signal(());
+    embassy_futures::join::join4(
+        indicator_loop(neopixel, buzzer, state),
+        sd_logging_loop(),
+        gps_loop(),
+        telemetry_loop(),
+    ).await;
+}
+
+// TODO: All of these should be moved to their own files and actually implemented.
+async fn sd_logging_loop() {
+    let mut ticker: Ticker = Ticker::every(Duration::from_hz(20));
     loop {
-        Timer::after_millis(1000).await;
+        ticker.next().await;
+    }
+}
+
+async fn gps_loop() {
+    let mut ticker: Ticker = Ticker::every(Duration::from_hz(5));
+    loop {
+        ticker.next().await;
+    }
+}
+
+async fn telemetry_loop() {
+    let mut ticker: Ticker = Ticker::every(Duration::from_hz(5));
+    loop {
+        ticker.next().await;
     }
 }

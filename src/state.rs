@@ -7,35 +7,38 @@
 
 #![allow(dead_code, unused_variables)]
 
-use defmt::info;
+use defmt::{error, info};
+use embassy_rp::gpio::Output;
 use embassy_rp::peripherals::PIO0;
 use embassy_rp::pio;
 use embassy_rp::pio::Pio;
 use embassy_rp::pio_programs::ws2812;
 use embassy_rp::pio_programs::ws2812::{Grb, PioWs2812, PioWs2812Program, RgbColorOrder};
-use embassy_time::{Duration, Instant};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::watch::Receiver;
+use embassy_time::{Duration, Instant, Ticker, Timer};
 use smart_leds::hsv::{hsv2rgb, Hsv};
 use smart_leds::RGB8;
+use uom::si::reciprocal_length::reciprocal_centimeter;
 use crate::config::HAS_DROGUE_CHUTE;
 use crate::math::Deg;
-use crate::Irqs;
+use crate::{state, Irqs, FLIGHT_STATE, READY};
+use crate::config::board::{Neopixel, NUM_LEDS};
 use crate::sensors::Sensors;
-use crate::config::board::{NeopixelColorOrder, NeopixelConfig, NUM_LEDS};
 use crate::types::SensorReadings;
 use crate::orientation::ahrs;
 use crate::orientation::ahrs::AhrsState;
 use crate::output::roll_controller;
 use crate::output::roll_controller::RollPid;
 
-pub struct SystemState<'a, PioInstance: pio::Instance, ColorOrder: RgbColorOrder, I2C: embedded_hal::i2c::I2c> {
-    pub state: FlightState,
+pub struct SystemState<'a, I2C: embedded_hal::i2c::I2c> {
+    pub state: Receiver<'a, CriticalSectionRawMutex, FlightState, 2>,
     pub ahrs: AhrsState,
     pub roll_pid: RollPid,
-    pub neopixel: PioWs2812<'a, PioInstance, 0, { NUM_LEDS }, ColorOrder>,
     pub sensors: Sensors<I2C>,
     pub(crate) ignition_time: Option<Instant>,
     pub(crate) last_tick: Instant,
-    // pub last_event: Option<EventType>, // who knows, these last three are just ideas about what might be interesting to have
+    // pub last_event: Option<EventType>, // who knows, these last two are just ideas about what might be interesting to have
     // pub error_flags: ErrorFlags,
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -78,27 +81,121 @@ pub enum LedColor {
     Off,
 }
 
-pub enum BeepCode {
-    Off,
-    // TODO: add support
+fn map_color(color: LedColor) -> Hsv {
+    match color {
+        LedColor::Off => Hsv { hue: 0, sat: 0, val: 0 },
+        LedColor::Red => Hsv { hue: 0, sat: 255, val: 255 },
+        LedColor::Orange => Hsv { hue: 14, sat: 255, val: 255 },
+        LedColor::Yellow => Hsv { hue: 42, sat: 255, val: 255 },
+        LedColor::Green => Hsv { hue: 85, sat: 255, val: 255 },
+        LedColor::Cyan => Hsv { hue: 127, sat: 255, val: 255 },
+        LedColor::Blue => Hsv { hue: 170, sat: 255, val: 255 },
+        LedColor::Magenta => Hsv { hue: 212, sat: 255, val: 255 },
+        LedColor::Purple => Hsv { hue: 255, sat: 255, val: 255 },
+        LedColor::White => Hsv { hue: 0, sat: 0, val: 255 },
+    }
 }
 
 pub struct StateIndicator {
     pub led: LedColor,
-    pub buzzer: BeepCode,
+    pub buzzer: &'static [(Duration, bool)],
 }
 
-impl<'a, PioInstance: pio::Instance, ColorOrder: RgbColorOrder, I2C: embedded_hal::i2c::I2c> SystemState<'a, PioInstance, ColorOrder, I2C> {
-    pub fn new(neopixel: PioWs2812<'a, PioInstance, 0, { NUM_LEDS }, ColorOrder>, sensors: Sensors<I2C>) -> Self {
-        Self {
-            state: FlightState::PreLaunch(GroundSubState::Startup),
+impl FlightState {
+    const SILENT: &'static [(Duration, bool)] = &[];
+    const ONE_PER_16S: &'static [(Duration, bool)] = &[
+        (Duration::from_millis(100), true),
+        (Duration::from_secs(16), false), // TODO: make some macro of something like buzzer_pattern!(beeps, cycle_duration) where beeps is a tuple of (beep_duration, beep_on)
+        // TODO: Maybe also make a similar macro for a series of beeps, like with parameters of num beeps, beep length, and time between beeps?
+    ];
+    pub fn indicator(&self) -> StateIndicator {
+        // TODO: should probably add GPS lock check here
+        match &self {
+            FlightState::PreLaunch(GroundSubState::Startup) => StateIndicator {
+                led: LedColor::Blue,
+                buzzer: FlightState::SILENT,
+            },
+            FlightState::PreLaunch(GroundSubState::ReadyToLaunch) => StateIndicator {
+                led: LedColor::Green,
+                buzzer: FlightState::ONE_PER_16S, // one per 16 seconds
+            },
+            FlightState::Ascent(AscentSubState::Burn) => StateIndicator {
+                led: LedColor::Purple,
+                buzzer: FlightState::SILENT,
+            },
+            FlightState::Recovery(RecoverySubState::Landed) => StateIndicator {
+                led: LedColor::Cyan,
+                buzzer: FlightState::SILENT,
+            },
+            // TODO: handle errors somehow (fatal: red, non-fatal: orange)
+            _ => StateIndicator {
+                led: LedColor::Off,
+                buzzer: FlightState::SILENT,
+            },
+        }
+    }
+}
+
+pub async fn indicator_loop(
+    mut neopixel: Neopixel,
+    mut buzzer: Output<'static>,
+    mut receiver: Receiver<'static, CriticalSectionRawMutex, FlightState, 2>
+) {
+    // Every 20Hz, check the state and proceed with the according buzzer pattern.
+    let mut ticker = Ticker::every(Duration::from_hz(20));
+    let mut current_state = receiver.get().await;
+    let mut entered_at = Instant::now();
+    loop {
+        ticker.next().await;
+        let state_change = receiver.try_changed();
+        match state_change {
+            Some(new_state) => { // state changed
+                current_state = new_state;
+                entered_at = Instant::now();
+            }
+            None => {}
+        }
+        let config = current_state.indicator();
+
+        if state_change.is_some() { // no need to update the LED if the state hasn't changed
+            let color = map_color(config.led);
+            set_neopixel_color(&mut neopixel, color, 0.3).await;
+        }
+
+        let pattern = config.buzzer;
+        drive_buzzer(&mut buzzer, pattern, Instant::now() - entered_at);
+    }
+}
+
+fn drive_buzzer(buzzer: &mut Output, pattern: &[(Duration, bool)], elapsed: Duration) {
+    let total: Duration = pattern.iter().map(|(d, _)| *d).sum();
+    if total.as_ticks() == 0 {
+        buzzer.set_low();
+        return;
+    }
+    let mut phase = elapsed.as_ticks() % total.as_ticks();
+    let on = pattern.iter()
+        .find_map(|(d, on)| if phase < d.as_ticks() { Some(*on) } else { phase -= d.as_ticks(); None })
+        .unwrap_or(false);
+    buzzer.set_level(on.into());
+}
+
+impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
+    pub fn new(sensors: Sensors<I2C>) -> Result<Self, ()> {
+        let state_receiver_option = FLIGHT_STATE.receiver();
+        if state_receiver_option.is_none() { // TODO: switch to match
+            error!("Failed to get flight state receiver; have too many receivers been initialized?");
+            return Err(())
+        }
+        let state = state_receiver_option.unwrap();
+        Ok(Self {
+            state,
             ahrs: AhrsState::default(),
             roll_pid: RollPid::default(),
-            neopixel,
             sensors,
             ignition_time: None,
             last_tick: Instant::now(),
-        }
+        })
     }
 
     /// The main loop tick
@@ -115,14 +212,14 @@ impl<'a, PioInstance: pio::Instance, ColorOrder: RgbColorOrder, I2C: embedded_ha
         self.ahrs.update(gyro, accel, mag, now);
         self.stream_telemetry(&sensor_data);
         self.log_to_flash(&sensor_data);
-        self.update_hardware_indicators().await;
 
-        match &self.state {
+        match self.state.get().await {
             // Everything that occurs on the ground prior to launch.
             FlightState::PreLaunch(sub) => match sub {
                 GroundSubState::Startup => {
-                    // TODO: startup sequence, but how to do it async and non-blocking? Maybe have it in main and just check in here if it's all done?
-                    self.transition_to(FlightState::PreLaunch(GroundSubState::ReadyToLaunch));
+                    if READY.signaled() { // TODO: should probably also check if AHRS ready
+                        self.transition_to(FlightState::PreLaunch(GroundSubState::ReadyToLaunch));
+                    }
                 }
                 GroundSubState::ReadyToLaunch => {
                     if sensor_data.has_launched() {
@@ -177,40 +274,8 @@ impl<'a, PioInstance: pio::Instance, ColorOrder: RgbColorOrder, I2C: embedded_ha
         if next_state == FlightState::Recovery(RecoverySubState::Landed) {
             self.ahrs.landing();
         }
-        self.state = next_state;
-    }
 
-    pub fn indicator(&self) -> StateIndicator {
-        // TODO: should probably add GPS lock check here
-        match &self.state {
-            FlightState::PreLaunch(GroundSubState::Startup) => StateIndicator {
-                led: LedColor::Blue,
-                buzzer: BeepCode::Off,
-            },
-            FlightState::PreLaunch(GroundSubState::ReadyToLaunch) => StateIndicator {
-                led: LedColor::Green,
-                buzzer: BeepCode::Off,
-            },
-            FlightState::Ascent(AscentSubState::Burn) => StateIndicator {
-                led: LedColor::Purple,
-                buzzer: BeepCode::Off,
-            },
-            FlightState::Recovery(RecoverySubState::Landed) => StateIndicator {
-                led: LedColor::Cyan,
-                buzzer: BeepCode::Off,
-            },
-            // TODO: handle errors somehow (fatal: red, non-fatal: orange)
-            _ => StateIndicator {
-                led: LedColor::Off,
-                buzzer: BeepCode::Off,
-            },
-        }
-    }
-
-    async fn update_hardware_indicators(&mut self) {
-        let config = self.indicator();
-        set_neopixel_color(&mut self.neopixel, map_color(config.led), 0.3).await;
-        // TODO: implement buzzer
+        FLIGHT_STATE.sender().send(next_state);
     }
 
     // Stub methods for demonstration
@@ -233,23 +298,8 @@ pub fn roll_program(time_since_ignition: Duration) -> Deg {
     }
 }
 
-fn map_color(color: LedColor) -> Hsv {
-    match color {
-        LedColor::Off => Hsv { hue: 0, sat: 0, val: 0 },
-        LedColor::Red => Hsv { hue: 0, sat: 255, val: 255 },
-        LedColor::Orange => Hsv { hue: 14, sat: 255, val: 255 },
-        LedColor::Yellow => Hsv { hue: 42, sat: 255, val: 255 },
-        LedColor::Green => Hsv { hue: 85, sat: 255, val: 255 },
-        LedColor::Cyan => Hsv { hue: 127, sat: 255, val: 255 },
-        LedColor::Blue => Hsv { hue: 170, sat: 255, val: 255 },
-        LedColor::Magenta => Hsv { hue: 212, sat: 255, val: 255 },
-        LedColor::Purple => Hsv { hue: 255, sat: 255, val: 255 },
-        LedColor::White => Hsv { hue: 0, sat: 0, val: 255 },
-    }
-}
-
-async fn set_neopixel_color<PioInstance: pio::Instance, ColorOrder: RgbColorOrder>(
-    neopixel: &mut PioWs2812<'_, PioInstance, 0, 1, ColorOrder>,
+async fn set_neopixel_color(
+    neopixel: &mut Neopixel,
     color_hsv: Hsv,
     brightness: f32,
 ) {
@@ -258,12 +308,12 @@ async fn set_neopixel_color<PioInstance: pio::Instance, ColorOrder: RgbColorOrde
         sat: color_hsv.sat,
         val: (brightness * color_hsv.val as f32) as u8,
     };
-    let data = [hsv2rgb(color_hsv_dimmed); 1];
+    let data = [hsv2rgb(color_hsv_dimmed); NUM_LEDS];
     neopixel.write(&data).await;
 }
 
-async fn set_neopixel_color_rgb<PioInstance: pio::Instance, ColorOrder: RgbColorOrder>(
-    neopixel: &mut PioWs2812<'_, PioInstance, 0, 1, ColorOrder>,
+async fn set_neopixel_color_rgb(
+    neopixel: &mut Neopixel,
     color_rgb: RGB8,
     brightness: f32,
 ) {
@@ -272,6 +322,6 @@ async fn set_neopixel_color_rgb<PioInstance: pio::Instance, ColorOrder: RgbColor
         g: (brightness * color_rgb.g as f32) as u8,
         b: (brightness * color_rgb.b as f32) as u8,
     };
-    let data = [color_rgb_dimmed; 1];
+    let data = [color_rgb_dimmed; NUM_LEDS];
     neopixel.write(&data).await;
 }
