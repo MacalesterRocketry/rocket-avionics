@@ -1,0 +1,37 @@
+# 1. Base / Default Config (Flash and Run)
+[default.general]
+chip = "RP235x"
+[default.probe]
+protocol = "Swd"
+[default.flashing]
+enabled = true          # FLASH
+[default.reset]
+enabled = true          # RESET
+halt_afterwards = false
+[default.rtt]
+enabled = true
+
+# 2. Reset & Attach Config (No flash, soft reset)
+[reset_attach.general]
+chip = "RP235x"
+[reset_attach.probe]
+protocol = "Swd"
+[reset_attach.flashing]
+enabled = false         # DO NOT FLASH
+[reset_attach.reset]
+enabled = true          # DO RESET
+halt_afterwards = false
+[reset_attach.rtt]
+enabled = true
+
+# 3. Just Attach Config (No flash, no reset)
+[attach.general]
+chip = "RP235x"
+[attach.probe]
+protocol = "Swd"
+[attach.flashing]
+enabled = false         # DO NOT FLASH
+[attach.reset]
+enabled = false         # DO NOT RESET
+[attach.rtt]
+enabled = true

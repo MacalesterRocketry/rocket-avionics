@@ -161,53 +161,29 @@ async fn core0_main(
 
 /// Core 1: I/O background. Owns SD card + GPS UART + indicators.
 #[embassy_executor::task]
-async fn core1_main(sd_config: SdConfig,
-                    uart_config: UartConfig,
-                    indicators_config: IndicatorsConfig,
+async fn core1_main(
+    sd_config: SdConfig,
+    uart_config: UartConfig,
+    indicators_config: IndicatorsConfig,
 ) {
     info!("core 1: I/O task starting");
-    info!("initializing buzzer");
-    let mut buzzer = Output::new(indicators_config.buzzer, embassy_rp::gpio::Level::Low);
-    buzzer.set_low();
-    info!("buzzer initialized");
-
-    info!("initializing NeoPixel");
-    let Pio {
-        mut common, sm0, ..
-    } = Pio::new(indicators_config.neopixel_pio, Irqs);
-    let program = PioWs2812Program::new(&mut common);
-    let neopixel: Neopixel = PioWs2812::new(
-        &mut common,
-        sm0,
-        indicators_config.neopixel_channel,
-        Irqs,
-        indicators_config.neopixel,
-        &program,
-    );
-    info!("NeoPixel initialized");
-
-    let state_receiver_option = FLIGHT_STATE.receiver();
-    if state_receiver_option.is_none() { // TODO: switch to match
-        defmt::panic!("Failed to get flight state receiver; have too many receivers been initialized?");
-    }
-    let state = state_receiver_option.unwrap();
 
     // TODO:
     //   • init SD card (SPI1 @ 50 MHz, embedded-sdmmc::VolumeManager)
     //   • init UART1 for GPS @ 9600 baud, send PMTK config
 
 
-    READY.signal(());
+    READY.signal(()); // TODO: figure out some way for each loop to signal when it's ready
     embassy_futures::join::join4(
-        indicator_loop(neopixel, buzzer, state),
-        sd_logging_loop(),
+        indicator_loop(indicators_config),
+        sd_logging_loop(sd_config),
         gps_loop(),
         telemetry_loop(),
     ).await;
 }
 
 // TODO: All of these should be moved to their own files and actually implemented.
-async fn sd_logging_loop() {
+async fn sd_logging_loop(sd_config: SdConfig) {
     let mut ticker: Ticker = Ticker::every(Duration::from_hz(20));
     loop {
         ticker.next().await;

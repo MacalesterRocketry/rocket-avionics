@@ -23,7 +23,7 @@ use uom::si::reciprocal_length::reciprocal_centimeter;
 use crate::config::HAS_DROGUE_CHUTE;
 use crate::math::Deg;
 use crate::{state, Irqs, FLIGHT_STATE, READY};
-use crate::config::board::{Neopixel, NUM_LEDS};
+use crate::config::board::{IndicatorsConfig, Neopixel, NUM_LEDS};
 use crate::sensors::Sensors;
 use crate::types::SensorReadings;
 use crate::orientation::ahrs;
@@ -41,32 +41,33 @@ pub struct SystemState<'a, I2C: embedded_hal::i2c::I2c> {
     // pub last_event: Option<EventType>, // who knows, these last two are just ideas about what might be interesting to have
     // pub error_flags: ErrorFlags,
 }
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
 pub enum FlightState {
     PreLaunch(GroundSubState),
     Ascent(AscentSubState),
     Recovery(RecoverySubState),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
 pub enum GroundSubState {
     Startup,
     ReadyToLaunch,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
 pub enum AscentSubState {
     Burn,
     Coast,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
 pub enum RecoverySubState {
     DrogueDeploy,
     MainDeploy,
     Landed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
 pub enum LedColor {
     Red,
     Orange,
@@ -137,10 +138,11 @@ impl FlightState {
 }
 
 pub async fn indicator_loop(
-    mut neopixel: Neopixel,
-    mut buzzer: Output<'static>,
-    mut receiver: Receiver<'static, CriticalSectionRawMutex, FlightState, 2>
+    indicators_config: IndicatorsConfig,
 ) {
+    let (mut buzzer, mut neopixel, mut receiver) = init_indicators(indicators_config);
+    let mut first_run = true;
+
     // Every 20Hz, check the state and proceed with the according buzzer pattern.
     let mut ticker = Ticker::every(Duration::from_hz(20));
     let mut current_state = receiver.get().await;
@@ -150,6 +152,7 @@ pub async fn indicator_loop(
         let state_change = receiver.try_changed();
         match state_change {
             Some(new_state) => { // state changed
+                info!("State changed: {:?} -> {:?}", current_state, new_state);
                 current_state = new_state;
                 entered_at = Instant::now();
             }
@@ -157,14 +160,50 @@ pub async fn indicator_loop(
         }
         let config = current_state.indicator();
 
-        if state_change.is_some() { // no need to update the LED if the state hasn't changed
+        if state_change.is_some() || first_run { // no need to update the LED if the state hasn't changed
             let color = map_color(config.led);
             set_neopixel_color(&mut neopixel, color, 0.3).await;
         }
 
         let pattern = config.buzzer;
         drive_buzzer(&mut buzzer, pattern, Instant::now() - entered_at);
+
+        if first_run {
+            first_run = false;
+        }
     }
+}
+
+fn init_indicators(indicators_config: IndicatorsConfig) -> (Output<'static>, Neopixel, Receiver<'static, CriticalSectionRawMutex, FlightState, 2>) {
+    info!("initializing buzzer");
+    let mut buzzer = Output::new(indicators_config.buzzer, embassy_rp::gpio::Level::Low);
+    buzzer.set_low();
+    info!("buzzer initialized");
+
+    info!("initializing NeoPixel");
+    let Pio {
+        mut common, sm0, ..
+    } = Pio::new(indicators_config.neopixel_pio, Irqs);
+    let program = PioWs2812Program::new(&mut common);
+    let neopixel: Neopixel = PioWs2812::new(
+        &mut common,
+        sm0,
+        indicators_config.neopixel_channel,
+        Irqs,
+        indicators_config.neopixel,
+        &program,
+    );
+    info!("NeoPixel initialized");
+
+    let state_receiver_option = FLIGHT_STATE.receiver();
+    let receiver = match state_receiver_option {
+        Some(receiver) => {
+            info!("Flight state receiver initialized");
+            receiver
+        },
+        None => defmt::panic!("Failed to get flight state receiver; have too many receivers been initialized?"),
+    };
+    (buzzer, neopixel, receiver)
 }
 
 fn drive_buzzer(buzzer: &mut Output, pattern: &[(Duration, bool)], elapsed: Duration) {

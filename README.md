@@ -1,6 +1,14 @@
 # Macalester Rocket Avionics
 
-This is the code for the avionics stack for the Macalester College High Power Rocketry team. It is currently in a very early state and in active development. At the moment, it just logs data, but active roll control with sensor fusion is in progress.
+This is the code for the avionics stack for the Macalester College High Power Rocketry team. It is currently in in active development. The Arduino version (under the `platformio` directory) is capable of active roll control, and a rewrite to Rust is underway.
+
+For the Rust version, here's how to run it. For each, append `--release` if the code on the device is running in release mode. This includes all the "just attach" versions; the logger needs to match its lookup table to whatever is running on the device.
+
+Build, flash, and attach: `cargo embed`
+
+Reset the device and attach: `cargo embed reset_attach`
+
+Just attach: `cargo embed attach`
 
 Hardware:
 - Microcontroller: Adafruit Feather RP2040 Adalogger
