@@ -1,0 +1,171 @@
+use defmt::*;
+use defmt_rtt as _;
+use smart_leds::hsv::{hsv2rgb, Hsv};
+use embassy_time::{Duration, Instant, Ticker};
+use smart_leds::RGB8;
+use embassy_rp::gpio::Output;
+use embassy_sync::watch::Receiver;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_rp::pio::Pio;
+use embassy_rp::pio_programs::ws2812::{PioWs2812, PioWs2812Program};
+use crate::config::board::{IndicatorsConfig, Neopixel, NUM_LEDS};
+use crate::{mark_init_complete, mark_init_failed, Irqs, Subsystem, FLIGHT_STATE};
+use crate::state::FlightState;
+
+#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
+pub enum LedColor {
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Cyan,
+    Blue,
+    Magenta,
+    Purple,
+    // maybe useful?
+    White,
+    Off,
+}
+
+fn map_color(color: LedColor) -> Hsv {
+    match color {
+        LedColor::Off => Hsv { hue: 0, sat: 0, val: 0 },
+        LedColor::Red => Hsv { hue: 0, sat: 255, val: 255 },
+        LedColor::Orange => Hsv { hue: 14, sat: 255, val: 255 },
+        LedColor::Yellow => Hsv { hue: 42, sat: 255, val: 255 },
+        LedColor::Green => Hsv { hue: 85, sat: 255, val: 255 },
+        LedColor::Cyan => Hsv { hue: 127, sat: 255, val: 255 },
+        LedColor::Blue => Hsv { hue: 170, sat: 255, val: 255 },
+        LedColor::Magenta => Hsv { hue: 212, sat: 255, val: 255 },
+        LedColor::Purple => Hsv { hue: 255, sat: 255, val: 255 },
+        LedColor::White => Hsv { hue: 0, sat: 0, val: 255 },
+    }
+}
+
+pub struct StateIndicator {
+    pub led: LedColor,
+    pub buzzer: &'static [(Duration, bool)],
+}
+
+pub async fn indicator_loop(
+    indicators_config: IndicatorsConfig,
+) {
+    let (mut buzzer, mut neopixel, mut receiver) = match init_indicators(indicators_config) {
+        Ok(return_val) => {
+            mark_init_complete(Subsystem::INDICATORS);
+            return_val
+        },
+        Err(_) => {
+            mark_init_failed(Subsystem::INDICATORS);
+            return;
+        }
+    };
+    let mut first_run = true;
+
+    // Every 20Hz, check the state and proceed with the according buzzer pattern.
+    let mut ticker = Ticker::every(Duration::from_hz(20));
+    let mut current_state = receiver.get().await;
+    let mut entered_at = Instant::now();
+    loop {
+        ticker.next().await;
+        let state_change = receiver.try_changed();
+        match state_change {
+            Some(new_state) => { // state changed
+                info!("State changed: {:?} -> {:?}", current_state, new_state);
+                current_state = new_state;
+                entered_at = Instant::now();
+            }
+            None => {}
+        }
+        let config = current_state.indicator();
+
+        if state_change.is_some() || first_run { // no need to update the LED if the state hasn't changed
+            let color = map_color(config.led);
+            set_neopixel_color(&mut neopixel, color, 0.3).await;
+            // TODO: Maybe flash between orange and state color for warnings?
+        }
+
+        let pattern = config.buzzer;
+        drive_buzzer(&mut buzzer, pattern, Instant::now() - entered_at).await;
+
+        if first_run {
+            first_run = false;
+        }
+    }
+}
+
+fn init_indicators(indicators_config: IndicatorsConfig) -> Result<(Output<'static>, Neopixel, Receiver<'static, CriticalSectionRawMutex, FlightState, 2>), ()> {
+    info!("initializing buzzer");
+    let mut buzzer = Output::new(indicators_config.buzzer, embassy_rp::gpio::Level::Low);
+    buzzer.set_low();
+    info!("buzzer initialized");
+
+    info!("initializing NeoPixel");
+    let Pio {
+        mut common, sm0, ..
+    } = Pio::new(indicators_config.neopixel_pio, Irqs);
+    let program = PioWs2812Program::new(&mut common);
+    let neopixel: Neopixel = PioWs2812::new(
+        &mut common,
+        sm0,
+        indicators_config.neopixel_channel,
+        Irqs,
+        indicators_config.neopixel,
+        &program,
+    );
+    info!("NeoPixel initialized");
+
+    let state_receiver_option = FLIGHT_STATE.receiver();
+    let receiver = match state_receiver_option {
+        Some(receiver) => {
+            info!("Flight state receiver initialized");
+            receiver
+        },
+        None => {
+            error!("Failed to get flight state receiver; have too many receivers been initialized?");
+            return Err(());
+        },
+    };
+    Ok((buzzer, neopixel, receiver))
+}
+
+pub async fn drive_buzzer(buzzer: &mut Output<'_>, pattern: &[(Duration, bool)], elapsed: Duration) {
+    let total: Duration = pattern.iter().map(|(d, _)| *d).sum();
+    if total.as_ticks() == 0 {
+        buzzer.set_low();
+        return;
+    }
+    let mut phase = elapsed.as_ticks() % total.as_ticks();
+    let on = pattern.iter()
+        .find_map(|(d, on)| if phase < d.as_ticks() { Some(*on) } else { phase -= d.as_ticks(); None })
+        .unwrap_or(false);
+    buzzer.set_level(on.into());
+}
+
+pub async fn set_neopixel_color(
+    neopixel: &mut Neopixel,
+    color_hsv: Hsv,
+    brightness: f32,
+) {
+    let color_hsv_dimmed = Hsv {
+        hue: color_hsv.hue,
+        sat: color_hsv.sat,
+        val: (brightness * color_hsv.val as f32) as u8,
+    };
+    let data = [hsv2rgb(color_hsv_dimmed); NUM_LEDS];
+    neopixel.write(&data).await;
+}
+
+pub async fn set_neopixel_color_rgb(
+    neopixel: &mut Neopixel,
+    color_rgb: RGB8,
+    brightness: f32,
+) {
+    let color_rgb_dimmed = RGB8 {
+        r: (brightness * color_rgb.r as f32) as u8,
+        g: (brightness * color_rgb.g as f32) as u8,
+        b: (brightness * color_rgb.b as f32) as u8,
+    };
+    let data = [color_rgb_dimmed; NUM_LEDS];
+    neopixel.write(&data).await;
+}

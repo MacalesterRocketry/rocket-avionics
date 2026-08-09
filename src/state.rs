@@ -22,12 +22,14 @@ use smart_leds::RGB8;
 use uom::si::reciprocal_length::reciprocal_centimeter;
 use crate::config::HAS_DROGUE_CHUTE;
 use crate::math::Deg;
-use crate::{state, Irqs, FLIGHT_STATE, READY};
+use crate::{is_critical_failure, is_init_all_complete, is_init_critical_complete, mark_init_complete, mark_init_failed, state, Irqs, Subsystem, FLIGHT_STATE};
 use crate::config::board::{IndicatorsConfig, Neopixel, NUM_LEDS};
+use crate::errors::handle_unrecoverable_error;
 use crate::sensors::Sensors;
 use crate::types::SensorReadings;
 use crate::orientation::ahrs;
 use crate::orientation::ahrs::AhrsState;
+use crate::output::indication::{LedColor, StateIndicator};
 use crate::output::roll_controller;
 use crate::output::roll_controller::RollPid;
 
@@ -67,41 +69,6 @@ pub enum RecoverySubState {
     Landed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
-pub enum LedColor {
-    Red,
-    Orange,
-    Yellow,
-    Green,
-    Cyan,
-    Blue,
-    Magenta,
-    Purple,
-    // maybe useful?
-    White,
-    Off,
-}
-
-fn map_color(color: LedColor) -> Hsv {
-    match color {
-        LedColor::Off => Hsv { hue: 0, sat: 0, val: 0 },
-        LedColor::Red => Hsv { hue: 0, sat: 255, val: 255 },
-        LedColor::Orange => Hsv { hue: 14, sat: 255, val: 255 },
-        LedColor::Yellow => Hsv { hue: 42, sat: 255, val: 255 },
-        LedColor::Green => Hsv { hue: 85, sat: 255, val: 255 },
-        LedColor::Cyan => Hsv { hue: 127, sat: 255, val: 255 },
-        LedColor::Blue => Hsv { hue: 170, sat: 255, val: 255 },
-        LedColor::Magenta => Hsv { hue: 212, sat: 255, val: 255 },
-        LedColor::Purple => Hsv { hue: 255, sat: 255, val: 255 },
-        LedColor::White => Hsv { hue: 0, sat: 0, val: 255 },
-    }
-}
-
-pub struct StateIndicator {
-    pub led: LedColor,
-    pub buzzer: &'static [(Duration, bool)],
-}
-
 impl FlightState {
     const SILENT: &'static [(Duration, bool)] = &[];
     const ONE_PER_16S: &'static [(Duration, bool)] = &[
@@ -137,88 +104,6 @@ impl FlightState {
     }
 }
 
-pub async fn indicator_loop(
-    indicators_config: IndicatorsConfig,
-) {
-    let (mut buzzer, mut neopixel, mut receiver) = init_indicators(indicators_config);
-    let mut first_run = true;
-
-    // Every 20Hz, check the state and proceed with the according buzzer pattern.
-    let mut ticker = Ticker::every(Duration::from_hz(20));
-    let mut current_state = receiver.get().await;
-    let mut entered_at = Instant::now();
-    loop {
-        ticker.next().await;
-        let state_change = receiver.try_changed();
-        match state_change {
-            Some(new_state) => { // state changed
-                info!("State changed: {:?} -> {:?}", current_state, new_state);
-                current_state = new_state;
-                entered_at = Instant::now();
-            }
-            None => {}
-        }
-        let config = current_state.indicator();
-
-        if state_change.is_some() || first_run { // no need to update the LED if the state hasn't changed
-            let color = map_color(config.led);
-            set_neopixel_color(&mut neopixel, color, 0.3).await;
-        }
-
-        let pattern = config.buzzer;
-        drive_buzzer(&mut buzzer, pattern, Instant::now() - entered_at);
-
-        if first_run {
-            first_run = false;
-        }
-    }
-}
-
-fn init_indicators(indicators_config: IndicatorsConfig) -> (Output<'static>, Neopixel, Receiver<'static, CriticalSectionRawMutex, FlightState, 2>) {
-    info!("initializing buzzer");
-    let mut buzzer = Output::new(indicators_config.buzzer, embassy_rp::gpio::Level::Low);
-    buzzer.set_low();
-    info!("buzzer initialized");
-
-    info!("initializing NeoPixel");
-    let Pio {
-        mut common, sm0, ..
-    } = Pio::new(indicators_config.neopixel_pio, Irqs);
-    let program = PioWs2812Program::new(&mut common);
-    let neopixel: Neopixel = PioWs2812::new(
-        &mut common,
-        sm0,
-        indicators_config.neopixel_channel,
-        Irqs,
-        indicators_config.neopixel,
-        &program,
-    );
-    info!("NeoPixel initialized");
-
-    let state_receiver_option = FLIGHT_STATE.receiver();
-    let receiver = match state_receiver_option {
-        Some(receiver) => {
-            info!("Flight state receiver initialized");
-            receiver
-        },
-        None => defmt::panic!("Failed to get flight state receiver; have too many receivers been initialized?"),
-    };
-    (buzzer, neopixel, receiver)
-}
-
-fn drive_buzzer(buzzer: &mut Output, pattern: &[(Duration, bool)], elapsed: Duration) {
-    let total: Duration = pattern.iter().map(|(d, _)| *d).sum();
-    if total.as_ticks() == 0 {
-        buzzer.set_low();
-        return;
-    }
-    let mut phase = elapsed.as_ticks() % total.as_ticks();
-    let on = pattern.iter()
-        .find_map(|(d, on)| if phase < d.as_ticks() { Some(*on) } else { phase -= d.as_ticks(); None })
-        .unwrap_or(false);
-    buzzer.set_level(on.into());
-}
-
 impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
     pub fn new(sensors: Sensors<I2C>) -> Result<Self, ()> {
         let state_receiver_option = FLIGHT_STATE.receiver();
@@ -239,6 +124,11 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
 
     /// The main loop tick
     pub async fn tick(&mut self) {
+        if is_critical_failure() {
+            error!("Critical failure detected; shutting down");
+            // TODO: close SD card, etc.
+            handle_unrecoverable_error()
+        }
         let now = Instant::now();
         let tick_time = now - self.last_tick;
         self.last_tick = now;
@@ -256,7 +146,7 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
             // Everything that occurs on the ground prior to launch.
             FlightState::PreLaunch(sub) => match sub {
                 GroundSubState::Startup => {
-                    if READY.signaled() { // TODO: should probably also check if AHRS ready
+                    if is_init_all_complete() { // TODO: AHRS should probably signal if it's ready too
                         self.transition_to(FlightState::PreLaunch(GroundSubState::ReadyToLaunch));
                     }
                 }
@@ -337,30 +227,3 @@ pub fn roll_program(time_since_ignition: Duration) -> Deg {
     }
 }
 
-async fn set_neopixel_color(
-    neopixel: &mut Neopixel,
-    color_hsv: Hsv,
-    brightness: f32,
-) {
-    let color_hsv_dimmed = Hsv {
-        hue: color_hsv.hue,
-        sat: color_hsv.sat,
-        val: (brightness * color_hsv.val as f32) as u8,
-    };
-    let data = [hsv2rgb(color_hsv_dimmed); NUM_LEDS];
-    neopixel.write(&data).await;
-}
-
-async fn set_neopixel_color_rgb(
-    neopixel: &mut Neopixel,
-    color_rgb: RGB8,
-    brightness: f32,
-) {
-    let color_rgb_dimmed = RGB8 {
-        r: (brightness * color_rgb.r as f32) as u8,
-        g: (brightness * color_rgb.g as f32) as u8,
-        b: (brightness * color_rgb.b as f32) as u8,
-    };
-    let data = [color_rgb_dimmed; NUM_LEDS];
-    neopixel.write(&data).await;
-}

@@ -13,37 +13,37 @@
 
 extern crate uom;
 
+use crate::config::G;
+use crate::config::board::NUM_LEDS;
+use crate::config::board::{
+    AvionicsHardware, I2cConfig, IndicatorsConfig, InterruptConfig, Neopixel, PeripheralConfig,
+    SdConfig, UartConfig,
+};
+use crate::state::{FlightState, SystemState};
+use core::sync::atomic::{AtomicU8, Ordering};
 use defmt::*;
 use defmt_rtt as _;
-use embedded_hal::digital::OutputPin;
-use panic_probe as _;
-
-use embassy_executor::{Executor, SpawnError, SpawnToken};
-use embassy_rp::multicore::{spawn_core1, Stack};
-use static_cell::StaticCell;
-
-use crate::config::board::{AvionicsHardware, I2cConfig, IndicatorsConfig, InterruptConfig, Neopixel, PeripheralConfig, SdConfig, UartConfig};
-use defmt::*;
-use embassy_executor::Spawner;
+use embassy_executor::{Executor, SpawnError, SpawnToken, Spawner};
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::i2c;
+use embassy_rp::multicore::{Stack, spawn_core1};
 use embassy_rp::peripherals::{DMA_CH0, I2C0, PIO0};
 use embassy_rp::pio::Pio;
 use embassy_rp::pio_programs::ws2812::{Grb, PioWs2812, PioWs2812Program};
-use embassy_rp::{bind_interrupts, dma, pio, pio_programs, Peri, Peripherals};
+use embassy_rp::{Peri, Peripherals, bind_interrupts, dma, pio, pio_programs};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant, Ticker, Timer};
+use embedded_hal::digital::OutputPin;
 use embedded_hal_async::i2c::I2c;
-use smart_leds::hsv::{hsv2rgb, Hsv};
+use output::indication::indicator_loop;
+use smart_leds::hsv::{Hsv, hsv2rgb};
 use smart_leds::{RGB8, RGBA};
-use {defmt_rtt as _, panic_probe as _};
-use crate::config::G;
-use crate::config::board::NUM_LEDS;
-use crate::state::{indicator_loop, FlightState, SystemState};
+use static_cell::StaticCell;
 
 mod config;
+mod errors;
 mod log_packets;
 mod math;
 mod orientation;
@@ -70,11 +70,70 @@ static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
 pub static FLIGHT_STATE: Watch<CriticalSectionRawMutex, FlightState, 2> = Watch::new();
-pub static READY: Signal<CriticalSectionRawMutex, ()> = Signal::new();  // core 1 → core 0
+
+bitflags! {
+    pub struct Subsystem: u8 {
+        const BASE_SYSTEM = 1 << 0;
+        const INDICATORS  = 1 << 1;
+        const SD_CARD     = 1 << 2;
+        const GPS         = 1 << 3;
+        const SENSORS     = 1 << 4; // core 0
+    }
+}
+pub static FLIGHT_CRITICAL_SUBSYSTEMS: &[Subsystem] = &[Subsystem::BASE_SYSTEM, Subsystem::SENSORS];
+pub static INIT_DONE: AtomicU8 = AtomicU8::new(0);
+pub static INIT_FAILED: AtomicU8 = AtomicU8::new(0);
+pub static RUNTIME_FAILURES: AtomicU8 = AtomicU8::new(0);
+
+
+fn check_subsystems_any(subsystems: &[Subsystem], subsystem_flags: &AtomicU8) -> bool {
+    subsystems
+        .iter()
+        .any(|s| {
+            Subsystem::from_bits_truncate(subsystem_flags.load(Ordering::Acquire)).contains(*s)
+        })
+}
+fn check_subsystems_all(subsystems: &[Subsystem], subsystem_flags: &AtomicU8) -> bool {
+    subsystems
+        .iter()
+        .all(|s| {
+            Subsystem::from_bits_truncate(subsystem_flags.load(Ordering::Acquire)).contains(*s)
+        })
+}
+
+pub fn mark_init_complete(subsystem: Subsystem) {
+    info!("subsystem {} initialized", subsystem);
+    INIT_DONE.fetch_or(subsystem.bits(), Ordering::Release);
+}
+pub fn mark_init_failed(subsystem: Subsystem) {
+    error!("subsystem {} failed to initialize", subsystem);
+    INIT_FAILED.fetch_or(subsystem.bits(), Ordering::Release);
+}
+pub fn is_init_all_complete() -> bool {
+    Subsystem::from_bits_truncate(INIT_DONE.load(Ordering::Acquire)) == Subsystem::all()
+}
+pub fn is_init_critical_complete() -> bool {
+    check_subsystems_all(FLIGHT_CRITICAL_SUBSYSTEMS, &INIT_DONE)
+}
+pub fn is_init_any_failed() -> bool {
+    check_subsystems_any(FLIGHT_CRITICAL_SUBSYSTEMS, &INIT_FAILED)
+}
+pub fn is_init_critical_failed() -> bool {
+    check_subsystems_any(FLIGHT_CRITICAL_SUBSYSTEMS, &INIT_FAILED)
+}
+pub fn is_runtime_critical_failure() -> bool {
+    check_subsystems_any(FLIGHT_CRITICAL_SUBSYSTEMS, &RUNTIME_FAILURES)
+}
+pub fn is_critical_failure() -> bool {
+    is_init_critical_failed() || is_runtime_critical_failure()
+}
+// TODO: continue implementing error handling stuff
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! {
-    FLIGHT_STATE.sender().send(FlightState::PreLaunch(state::GroundSubState::Startup));
+    FLIGHT_STATE
+        .sender()
+        .send(FlightState::PreLaunch(state::GroundSubState::Startup));
 
     let p = embassy_rp::init(Default::default());
     let hw = take_hardware!(p);
@@ -84,10 +143,12 @@ async fn main(_spawner: Spawner) -> ! {
     spawn_core1(
         p.CORE1,
         unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
-        move || spawn_core(
-            EXECUTOR1.init(Executor::new()),
-            core1_main(hw.sd, hw.uart, hw.indicators)
-        ),
+        move || {
+            spawn_core(
+                EXECUTOR1.init(Executor::new()),
+                core1_main(hw.sd, hw.uart, hw.indicators),
+            )
+        },
     );
 
     spawn_core(
@@ -110,7 +171,7 @@ fn spawn_core(
     });
 }
 
-/// Core 0: the avionics hot loop. Skeleton — tasks below are TODOs.
+/// Core 0: everything fast and time-sensitive: sensors, AHRS, PID, servos, and the state machine.
 #[embassy_executor::task]
 async fn core0_main(
     i2c_config: I2cConfig,
@@ -131,16 +192,30 @@ async fn core0_main(
 
     info!("initializing sensors");
     let sensors = match sensors::init_all(i2c) {
-        Ok(sensors) => sensors,
+        Ok(sensors) => {
+            mark_init_complete(Subsystem::SENSORS);
+            sensors
+        }
         Err(e) => {
-            error!("Error initializing sensors: {:?}", defmt::Debug2Format(&e));
-            return;
+            error!("Error initializing sensors: {:?}", Debug2Format(&e));
+            mark_init_failed(Subsystem::SENSORS);
+            return; // TODO: instead of returning, we should probably either change the type of sensors or set up a panic handler and panic.
         }
     };
     info!("sensors initialized");
 
     info!("initializing system state");
-    let mut system = SystemState::new(sensors).unwrap_or_else(|_| defmt::panic!("Failed to initialize system state"));
+    let mut system = match SystemState::new(sensors) {
+        Ok(system) => {
+            mark_init_complete(Subsystem::BASE_SYSTEM);
+            system
+        }
+        Err(_) => {
+            error!("Failed to initialize system state");
+            mark_init_failed(Subsystem::BASE_SYSTEM);
+            return;
+        }
+    };
     // TODO: handle errors with Neopixel notifs and logging and stuff instead of panicking
     info!("system state initialized");
 
@@ -155,11 +230,16 @@ async fn core0_main(
         //  state handling, sensors, AHRS, and PID/servos. I guess state handling would combine all the data?
         //  Or maybe just extract PID/servos? But tick() should definitely be more tightly integrated
         //  with the loop and ticker.
+        //  What I'm thinking now: Sensors and AHRS definitely need to be together (but I need to
+        //  figure out how to handle slower sensors). PID and servos can be slower; it's probably
+        //  fine to be something like 50Hz instead of 400Hz, and it doesn't need to be tightly
+        //  integrated with sensors and AHRS. It can just read the AHRS data at any given moment.
+        //  I'm not totally sure where the state machine should go, but I guess the sensor loop makes sense.
         system.tick().await;
     }
 }
 
-/// Core 1: I/O background. Owns SD card + GPS UART + indicators.
+/// Core 1: everything slow or where timing is unimportant: GPS, SD writes, and indication.
 #[embassy_executor::task]
 async fn core1_main(
     sd_config: SdConfig,
@@ -172,18 +252,17 @@ async fn core1_main(
     //   • init SD card (SPI1 @ 50 MHz, embedded-sdmmc::VolumeManager)
     //   • init UART1 for GPS @ 9600 baud, send PMTK config
 
-
-    READY.signal(()); // TODO: figure out some way for each loop to signal when it's ready
-    embassy_futures::join::join4(
+    embassy_futures::join::join3(
         indicator_loop(indicators_config),
         sd_logging_loop(sd_config),
         gps_loop(),
-        telemetry_loop(),
-    ).await;
+    )
+    .await;
 }
 
 // TODO: All of these should be moved to their own files and actually implemented.
 async fn sd_logging_loop(sd_config: SdConfig) {
+    mark_init_complete(Subsystem::SD_CARD);
     let mut ticker: Ticker = Ticker::every(Duration::from_hz(20));
     loop {
         ticker.next().await;
@@ -191,14 +270,8 @@ async fn sd_logging_loop(sd_config: SdConfig) {
 }
 
 async fn gps_loop() {
-    let mut ticker: Ticker = Ticker::every(Duration::from_hz(5));
-    loop {
-        ticker.next().await;
-    }
-}
-
-async fn telemetry_loop() {
-    let mut ticker: Ticker = Ticker::every(Duration::from_hz(5));
+    mark_init_complete(Subsystem::GPS);
+    let mut ticker: Ticker = Ticker::every(Duration::from_hz(5)); // TODO: should this actually be 5 Hz? What happens if it's slightly off from the GPS clock?
     loop {
         ticker.next().await;
     }
