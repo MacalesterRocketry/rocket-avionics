@@ -199,7 +199,7 @@ async fn core0_main(
         Err(e) => {
             error!("Error initializing sensors: {:?}", Debug2Format(&e));
             mark_init_failed(Subsystem::SENSORS);
-            return; // TODO: instead of returning, we should probably either change the type of sensors or set up a panic handler and panic.
+            defmt::panic!("Failed to initialize sensors");
         }
     };
     info!("sensors initialized");

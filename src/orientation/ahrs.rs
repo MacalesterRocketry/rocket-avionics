@@ -9,44 +9,17 @@
 //! Status: SKELETON. Function signatures match the C++ API so the rest of the
 //! firmware can be ported against this surface, but bodies are stubs.
 
-#![allow(dead_code, unused_variables)]
-
-use embassy_time::Instant;
+use embassy_time::{Duration, Instant};
 use libm::{asin, atan2, cos, sin, sqrt};
 use crate::config::{AHRS_ACC_BETA, AHRS_MAG_BETA, G};
 use crate::math::{deg_to_rad, rad_to_deg, Deg, Grad4, Quat, Rad, Vec3};
-
-/// Body→earth quaternion rotation: `p = q ⊗ [0, v_b] ⊗ q*`
-pub fn rotate_body_to_earth(q: Quat, v_b: Vec3) -> Vec3 {
-    let r = q * v_b.to_quat(0.0) * q.conjugate();
-    Vec3::new(r.x, r.y, r.z)
-}
-
-/// Earth→body: `p = q* ⊗ [0, v_e] ⊗ q`
-pub fn rotate_earth_to_body(q: Quat, v_e: Vec3) -> Vec3 {
-    let r = q.conjugate() * v_e.to_quat(0.0) * q;
-    Vec3::new(r.x, r.y, r.z)
-}
-
-/// Δq from gyro rate `ω` over `dt`. Small-angle branch matches C++ for stability
-/// near zero rotation rate (avoids divide-by-zero in axis-angle form).
-pub fn delta_quat_from_gyro(omega: Vec3, dt: f64) -> Quat {
-    let wmag = omega.norm();
-    if wmag < 1e-12 {
-        Quat::new(1.0, 0.5 * omega.x * dt, 0.5 * omega.y * dt, 0.5 * omega.z * dt)
-    } else {
-        let axis = omega / wmag;
-        let theta = wmag * dt;
-        crate::math::axis_angle_to_quat(axis, theta)
-    }
-}
 
 /// Mutable AHRS runtime state. Lives behind an Embassy mutex; the sensor task
 /// owns the write side and the control loop reads via getter functions.
 #[derive(Debug, Clone, Copy)]
 pub struct AhrsState {
     pub q: Quat,
-    pub last_update_us: u64,
+    pub last_update: Instant,
     pub acceleration_earth: Vec3,
     pub velocity_earth: Vec3,
     pub position_earth: Vec3,
@@ -58,7 +31,7 @@ impl Default for AhrsState {
     fn default() -> Self {
         Self {
             q: Quat::IDENTITY,
-            last_update_us: Instant::now().as_micros(),
+            last_update: Instant::now(),
             acceleration_earth: Vec3::ZERO,
             velocity_earth: Vec3::ZERO,
             position_earth: Vec3::ZERO,
@@ -69,27 +42,12 @@ impl Default for AhrsState {
 }
 
 impl AhrsState {
-    /// One AHRS step. `in_flight=true` disables gravity-based accel correction
-    /// (in C++ this skips the Madgwick step entirely during burn/coast).
-    /// TODO: port full update logic — see `ahrs.cpp::update_ahrs`.
-    // pub fn update(&mut self, _gyro: Vec3, _accel: Vec3, _mag: Vec3, _now: embassy_time::Instant) {
-    //     // Stub. Will integrate:
-    //     //   1. dt = (now - last) / 1e6, skip if dt ∉ (0, 0.1)
-    //     //   2. q1 = q0 ⊗ Δq_gyro
-    //     //   3. q2 = normalize(q1)
-    //     //   4. q3 = madgwick correction if !in_flight
-    //     //   5. q4 = normalize(q3)
-    //     //   6. earth-frame accel = R(q4)·accel − [0,0,G]
-    //     //   7. integrate velocity, position
-    // }
     pub fn update(&mut self, gyro: Vec3, accel: Vec3, mag: Vec3, now: Instant) {
-        // Used to Calculate delta time
-        // TODO: switch to Duration and Instant
-        let now_micros = Instant::now().as_micros();
-        let dt = (now_micros - self.last_update_us) as f64 / 1000000.0;
-        self.last_update_us = now_micros;
+        let dt = now - self.last_update;
+        self.last_update = now;
 
-        if (dt <= 0.0 || dt > 0.1) { // usually like .005s, so if it's far greater, skip so we don't get huge jumps in orientation from bad timing
+        // usually like .005s, so if it's far greater, skip so we don't get huge jumps in orientation from bad timing
+        if dt <= Duration::from_millis(0) || dt > Duration::from_millis(100) {
             return; // Invalid time step, skip update
         }
 
@@ -98,7 +56,7 @@ impl AhrsState {
         let q0 = self.q;
 
         // Step 2: Gyro propagation (q1) - integrate angular rates
-        let delta_q = deltaQuatFromGyro(gyro, dt);
+        let delta_q = delta_quat_from_gyro(gyro, dt);
         let q1 = q0 * delta_q;
 
         // Step 3: Normalize (q2) - maintain quaternion unit length
@@ -106,7 +64,7 @@ impl AhrsState {
 
         // Step 4: Madgwick sensor fusion correction (q3) - fuse with accelerometer and magnetometer
         // In flight, we just follow the gyroscope. Gravity doesn't affect it, so we need to ignore the accelerometer, and the magnetometer is unreliable.
-        let q3 = if self.in_flight { q2 } else { madgwickCorrectionStep(q2, accel, mag, dt) };
+        let q3 = if self.in_flight { q2 } else { madgwick_correction_step(q2, accel, mag, dt) };
 
         // Step 5: Final normalization (q4) - ensure valid quaternion
         let q4 = q3.normalized();
@@ -116,13 +74,14 @@ impl AhrsState {
 
         // EARTH FRAME CONVERSIONS
         // Convert body-frame measurements to earth frame for control systems
-        let earthAccel = rotateBodyToEarth(q4, accel);
-        let earthGyro = rotateBodyToEarth(q4, gyro);
-        let earthMag = rotateBodyToEarth(q4, mag);
+        let _earth_accel = rotate_body_to_earth(q4, accel);
+        let _earth_gyro = rotate_body_to_earth(q4, gyro);
+        let _earth_mag = rotate_body_to_earth(q4, mag);
 
-        self.acceleration_earth = earthAccel - Vec3 {x: 0.0, y: 0.0, z: G}; // Remove gravity from vertical acceleration when on the ground
-        self.velocity_earth += self.acceleration_earth * dt;
-        self.position_earth += self.velocity_earth * dt;
+        self.acceleration_earth = _earth_accel - Vec3 {x: 0.0, y: 0.0, z: G}; // Remove gravity from vertical acceleration when on the ground
+        let dt_seconds = duration_to_seconds(dt);
+        self.velocity_earth += self.acceleration_earth * dt_seconds;
+        self.position_earth += self.velocity_earth * dt_seconds;
 
         self.angular_velocity_body = gyro; // still in body frame, but we can use it for control
 
@@ -170,8 +129,9 @@ impl AhrsState {
         self.velocity_earth = Vec3::ZERO;
     }
 
+    // TODO: should this function exist? Should it just be new()?
     pub fn start(&mut self) {
-        self.last_update_us = Instant::now().as_micros();
+        self.last_update = Instant::now();
     }
 
     pub fn get_orientation_earth(&self) -> Quat { self.q }
@@ -181,38 +141,36 @@ impl AhrsState {
     pub fn get_angular_velocity_body(&self) -> Vec3 { self.angular_velocity_body }
 }
 
-
-
-
-pub fn rotateBodyToEarth(q: Quat, v_b: Vec3) -> Vec3 {
+pub fn rotate_body_to_earth(q: Quat, v_b: Vec3) -> Vec3 {
     // p = q ⊗ [0,v_b] ⊗ q*
     let res = q * v_b.to_quat(0.0) * q.conjugate();
-    return Vec3{ x: res.x, y: res.y, z: res.z }; // last 3 are vector part
+    Vec3{ x: res.x, y: res.y, z: res.z } // last 3 are vector part
 }
 
-pub fn rotateEarthToBody(q: Quat, v_e: Vec3) -> Vec3 {
+pub fn rotate_earth_to_body(q: Quat, v_e: Vec3) -> Vec3 {
     // p = q* ⊗ [0,v_e] ⊗ q
     let res = q.conjugate() * v_e.to_quat(0.0) * q;
-    return Vec3{ x: res.x, y: res.y, z: res.z }; // last 3 are vector part
+    Vec3{ x: res.x, y: res.y, z: res.z } // last 3 are vector part
 }
 
 // small helper: axis-angle -> quaternion exact
-pub fn axisAngleRadToQuat(axis: Vec3, angle: f64) -> Quat {
+pub fn axis_angle_rad_to_quat(axis: Vec3, angle: f64) -> Quat {
     let half = angle * 0.5;
     let s = sin(half);
-    return Quat{ w: cos(half), x: axis.x * s, y: axis.y * s, z: axis.z * s };
+    Quat{ w: cos(half), x: axis.x * s, y: axis.y * s, z: axis.z * s }
 }
 
 // build delta quaternion(propagation) from angular rate omega (rad/s) and dt
-pub fn deltaQuatFromGyro(omega: Vec3, dt: f64) -> Quat {
+pub fn delta_quat_from_gyro(omega: Vec3, dt: Duration) -> Quat {
+    let dt_s = duration_to_seconds(dt);
     let wmag = omega.norm();
     if wmag < 1e-12 {
         // tiny rotation -> small-angle approx: q ≈ [1, 0.5*ω*dt]
-        Quat { w: 1.0, x: 0.5 * omega.x * dt, y: 0.5 * omega.y * dt, z: 0.5 * omega.z * dt }
+        Quat { w: 1.0, x: 0.5 * omega.x * dt_s, y: 0.5 * omega.y * dt_s, z: 0.5 * omega.z * dt_s }
     } else {
         let axis = omega / wmag;
-        let theta = wmag * dt;
-        axisAngleRadToQuat(axis, theta)
+        let theta = wmag * dt_s;
+        axis_angle_rad_to_quat(axis, theta)
     }
 }
 
@@ -222,7 +180,7 @@ pub fn compute_magnetometer_gradient(m_n: Vec3, q: Quat) -> Grad4 {
     // For magnetometer part we should compute reference direction and its gradient.
     // compute Earth's magnetic field in body frame and gradient.
     // Compute h = q ⊗ m_n ⊗ q*  (magnetic field in earth frame)
-    let h = rotateBodyToEarth(q, m_n);
+    let h = rotate_body_to_earth(q, m_n);
 
     // Projection of h onto x-y plane of Earth (reference)
     // b = [0, bx, 0, bz] as in Madgwick
@@ -234,7 +192,7 @@ pub fn compute_magnetometer_gradient(m_n: Vec3, q: Quat) -> Grad4 {
 
     // compute the gradient of magnetometer using a simplified combined gradient:
     // Compute an approximate mag error vector between predicted and measured (in body frame!)
-    let m_pred = rotateEarthToBody(q, b); // predicted magnetic field in body frame (reference)
+    let m_pred = rotate_earth_to_body(q, b); // predicted magnetic field in body frame (reference)
     let mag_err = Vec3 {
         x: m_pred.x / (m_pred.norm() + 1e-12) - m_n.x,
         y: m_pred.y / (m_pred.norm() + 1e-12) - m_n.y,
@@ -249,13 +207,12 @@ pub fn compute_magnetometer_gradient(m_n: Vec3, q: Quat) -> Grad4 {
         z: 2.0 * (q.w * mag_err.y - q.x * mag_err.x + q.y * mag_err.z - q.z * mag_err.y)
     };
     // Convert this vector into 4-component approximate gradient (spread across all axes)
-    let magGrad = Grad4 {
+    Grad4 {
         w: 0.0,
         x: g_mag_vec.x,
         y: g_mag_vec.y,
         z: g_mag_vec.z
-    };
-    return magGrad;
+    }
 }
 
 pub fn compute_accelerometer_gradient(a_n: Vec3, q: Quat) -> Grad4 {
@@ -275,110 +232,113 @@ pub fn compute_accelerometer_gradient(a_n: Vec3, q: Quat) -> Grad4 {
 
     // Jacobian J (3x4) lines combined into gradient g = J^T * f  (this expands to 4 components, as we need it to build a quaternion)
     // Madgwick 2010 paper's compact expression:
-    let accelGrad = Grad4 {
+    Grad4 {
         w: 0.0,
         x: -_2q3 * f.x + _2q2 * f.y,
         y:  _2q4 * f.x + _2q1 * f.y - _4q2 * f.z,
         z: -_2q1 * f.x + _2q4 * f.y - _4q3 * f.z,
-    };
-    return accelGrad;
+    }
 }
 
 // returns corrected sensor fused quaternion as quaternion q3 (unnormalized)
-fn madgwickCorrectionStep(q_pred: Quat, // predicted quaternion (gyro-propagated & normalized) -> q2
+fn madgwick_correction_step(q_pred: Quat, // predicted quaternion (gyro-propagated & normalized) -> q2
                             acc: Vec3, // accelerometer (bias-corrected) in body frame (no normalizing required; we can normalize inside)
                             mag: Vec3, // magnetometer (bias-corrected & soft-iron corrected) in body frame
-                            dt: f64) -> Quat { // time step (s)
+                            dt: Duration) -> Quat { // time step (s)
     let q = q_pred;
 
     let nm = mag.norm();
-    let mut magGrad: Grad4 = Grad4 {w: 0.0, x: 0.0, y: 0.0, z: 0.0};
+    let mut mag_grad = Grad4 {w: 0.0, x: 0.0, y: 0.0, z: 0.0};
     // Skip magnetometer correction if the measurement is too small
-    if (nm >= 1e-12) {
+    if nm >= 1e-12 {
         let m_n = mag / nm; // normalized magnetometer measurement
-        magGrad = compute_magnetometer_gradient(m_n, q);
+        mag_grad = compute_magnetometer_gradient(m_n, q);
     }
 
     let na = acc.norm();
-    let mut accelGrad = Grad4 {w: 0.0, x: 0.0, y: 0.0, z: 0.0};
+    let mut accel_grad = Grad4 {w: 0.0, x: 0.0, y: 0.0, z: 0.0};
     // Skip gravity-based accelerometer correction if the measurement doesn't seem like gravity (like during burn or coast)
-    if (na >= 0.5 * G && na <= 2.0 * G) {
+    if na >= 0.5 * G && na <= 2.0 * G {
         let a_n = acc / na; // normalized accelerometer measurement
-        accelGrad = compute_accelerometer_gradient(a_n, q);
+        accel_grad = compute_accelerometer_gradient(a_n, q);
     }
 
-    let mut g_combined = accelGrad * AHRS_ACC_BETA + magGrad * AHRS_MAG_BETA;
+    let mut g_combined = accel_grad * AHRS_ACC_BETA + mag_grad * AHRS_MAG_BETA;
 
     // Normalize gradient
     let gn = g_combined.norm();
-    if (gn > 0.0) {
+    if gn > 0.0 {
         g_combined /= gn;
     }
 
     // Integrate to get corrected quaternion (Simple Euler integration)
-    return q_pred - (g_combined * dt).into();
+    q_pred - (g_combined * duration_to_seconds(dt)).into()
 }
 
 // Bias computation (mean across samples)
-pub fn computeBiasMean(samples: &[Vec3]) -> Vec3 {
+pub fn compute_bias_mean(samples: &[Vec3]) -> Vec3 {
     let mut s = Vec3 { x: 0.0, y: 0.0, z: 0.0 };
-    if (samples.is_empty()) {
+    if samples.is_empty() {
          return s;
     }
     for v in samples.iter() {
         s += *v;
     }
-    return s / samples.len() as f64;
+    s / samples.len() as f64
 }
 
 // Main Loop AHRS function Using the above utilities
 
 pub fn calculate_pitch_rad(q: Quat) -> Rad {
-    return atan2(2.0 * (q.w * q.x + q.y * q.z),
-               1.0 - 2.0 * (q.x * q.x + q.y * q.y));
+    atan2(2.0 * (q.w * q.x + q.y * q.z),
+          1.0 - 2.0 * (q.x * q.x + q.y * q.y))
 }
 
 pub fn calculate_yaw_rad(q: Quat) -> Rad {
-    return asin(2.0 * (q.w * q.y - q.z * q.x));
+    asin(2.0 * (q.w * q.y - q.z * q.x))
 }
 
 pub fn calculate_roll_rad(q: Quat) -> Rad {
-    return -atan2(2.0 * (q.w * q.z + q.x * q.y),
-               1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+    -atan2(2.0 * (q.w * q.z + q.x * q.y),
+           1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 }
 
 pub fn calculate_roll_deg(q: Quat) -> Deg {
-    return rad_to_deg(calculate_roll_rad(q));
+    rad_to_deg(calculate_roll_rad(q))
 }
 
 pub fn calculate_pitch_deg(q: Quat) -> Deg {
-    return rad_to_deg(calculate_pitch_rad(q));
+    rad_to_deg(calculate_pitch_rad(q))
 }
 
 pub fn calculate_yaw_deg(q: Quat) -> Deg {
-    return rad_to_deg(calculate_yaw_rad(q));
+    rad_to_deg(calculate_yaw_rad(q))
 }
 
 pub fn yaw_rad_to_quat(roll: Rad) -> Quat {
-    return axisAngleRadToQuat(Vec3 {x: 1.0, y: 0.0, z: 0.0}, roll);
+    axis_angle_rad_to_quat(Vec3 {x: 1.0, y: 0.0, z: 0.0}, roll)
 }
 
 pub fn pitch_rad_to_quat(yaw: Rad) -> Quat {
-    return axisAngleRadToQuat(Vec3 {x: 0.0, y: 0.0, z: 1.0}, yaw);
+    axis_angle_rad_to_quat(Vec3 {x: 0.0, y: 0.0, z: 1.0}, yaw)
 }
 
 pub fn roll_rad_to_quat(pitch: Rad) -> Quat {
-    return axisAngleRadToQuat(Vec3 {x: 0.0, y: 1.0, z: 0.0}, pitch);
+    axis_angle_rad_to_quat(Vec3 {x: 0.0, y: 1.0, z: 0.0}, pitch)
 }
 
 pub fn yaw_deg_to_quat(yaw: Deg) -> Quat {
-    return yaw_rad_to_quat(deg_to_rad(yaw));
+    yaw_rad_to_quat(deg_to_rad(yaw))
 }
 
 pub fn pitch_deg_to_quat(pitch: Deg) -> Quat {
-    return pitch_rad_to_quat(deg_to_rad(pitch));
+    pitch_rad_to_quat(deg_to_rad(pitch))
 }
 
 pub fn roll_deg_to_quat(roll: Deg) -> Quat {
-    return roll_rad_to_quat(deg_to_rad(roll));
+    roll_rad_to_quat(deg_to_rad(roll))
+}
+
+fn duration_to_seconds(dt: Duration) -> f64 {
+    dt.as_nanos() as f64 * 1e-9 // convert to seconds
 }

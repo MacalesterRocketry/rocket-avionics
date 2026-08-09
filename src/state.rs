@@ -106,12 +106,13 @@ impl FlightState {
 
 impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
     pub fn new(sensors: Sensors<I2C>) -> Result<Self, ()> {
-        let state_receiver_option = FLIGHT_STATE.receiver();
-        if state_receiver_option.is_none() { // TODO: switch to match
-            error!("Failed to get flight state receiver; have too many receivers been initialized?");
-            return Err(())
-        }
-        let state = state_receiver_option.unwrap();
+        let state = match FLIGHT_STATE.receiver() {
+            Some(receiver) => receiver,
+            None => {
+                error!("Failed to get flight state receiver; have too many receivers been initialized?");
+                return Err(())
+            }
+        };
         Ok(Self {
             state,
             ahrs: AhrsState::default(),
@@ -139,8 +140,6 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
         let mag = sensor_data.lis3.mag;
 
         self.ahrs.update(gyro, accel, mag, now);
-        self.stream_telemetry(&sensor_data);
-        self.log_to_flash(&sensor_data);
 
         match self.state.get().await {
             // Everything that occurs on the ground prior to launch.
@@ -206,11 +205,6 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
 
         FLIGHT_STATE.sender().send(next_state);
     }
-
-    // Stub methods for demonstration
-    fn stream_telemetry(&self, _: &SensorReadings) {}
-    fn log_to_flash(&self, _: &SensorReadings) {}
-    fn update_gps(&self) {}
 }
 
 /// Pre-programmed roll command: returns target roll angle (deg) as a function
