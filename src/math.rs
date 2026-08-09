@@ -346,6 +346,12 @@ impl From<Quat> for nalgebra::Quaternion<f64> {
     }
 }
 
+impl From<Grad4> for Quat {
+    fn from(g: Grad4) -> Self {
+        Quat::new(g.w, g.x, g.y, g.z)
+    }
+}
+
 // ─────────────────── Madgwick gradient as a 4-tuple (Grad4) ─────────────────
 /// Distinct type from `Quat` so we never accidentally feed a gradient into a
 /// Hamilton product. Scalar ops are intentionally limited to what the
@@ -390,6 +396,13 @@ impl DivAssign<f64> for Grad4 {
         self.x /= s;
         self.y /= s;
         self.z /= s;
+    }
+}
+
+impl From<Quat> for Grad4 {
+    #[inline]
+    fn from(q: Quat) -> Grad4 {
+        Grad4::new(q.w, q.x, q.y, q.z)
     }
 }
 
