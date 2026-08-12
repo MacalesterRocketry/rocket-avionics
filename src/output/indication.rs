@@ -44,7 +44,7 @@ fn map_color(color: LedColor) -> Hsv {
 
 pub struct StateIndicator {
     pub led: LedColor,
-    pub buzzer: &'static [(Duration, bool)],
+    pub buzzer: BeepCycle<'static>,
 }
 
 pub async fn indicator_loop(
@@ -129,16 +129,8 @@ fn init_indicators(indicators_config: IndicatorsConfig) -> Result<(Output<'stati
     Ok((buzzer, neopixel, receiver))
 }
 
-pub async fn drive_buzzer(buzzer: &mut Output<'_>, pattern: &[(Duration, bool)], elapsed: Duration) {
-    let total: Duration = pattern.iter().map(|(d, _)| *d).sum();
-    if total.as_ticks() == 0 {
-        buzzer.set_low();
-        return;
-    }
-    let mut phase = elapsed.as_ticks() % total.as_ticks();
-    let on = pattern.iter()
-        .find_map(|(d, on)| if phase < d.as_ticks() { Some(*on) } else { phase -= d.as_ticks(); None })
-        .unwrap_or(false);
+pub async fn drive_buzzer(buzzer: &mut Output<'_>, pattern: BeepCycle<'_>, elapsed: Duration) {
+    let on = pattern.is_on_at(elapsed);
     buzzer.set_level(on.into());
 }
 
@@ -168,4 +160,63 @@ pub async fn set_neopixel_color_rgb(
     };
     let data = [color_rgb_dimmed; NUM_LEDS];
     neopixel.write(&data).await;
+}
+
+pub type BeepSequence<'a> = &'a [(Duration, bool)];
+
+#[derive(Clone, Copy)]
+pub enum BeepCycle<'a> {
+    Silent,
+    /// specified number and duration of beeps
+    Pulse {
+        count: u32,
+        on_time: Duration,
+        off_time: Duration,
+        cycle_duration: Duration,
+    },
+    Custom {
+        beeps: BeepSequence<'a>,
+        cycle_duration: Duration,
+    },
+}
+
+impl<'a> BeepCycle<'a> {
+    pub fn is_on_at(&self, elapsed: Duration) -> bool {
+        match self {
+            BeepCycle::Silent => false,
+
+            BeepCycle::Pulse { count, on_time, off_time, cycle_duration } => {
+                let cycle_ticks = cycle_duration.as_ticks();
+                if cycle_ticks == 0 { return false; }
+
+                let time_in_cycle = elapsed.as_ticks() % cycle_ticks;
+                let period = on_time.as_ticks() + off_time.as_ticks();
+                let sequence_duration = period * (*count as u64);
+
+                if time_in_cycle >= sequence_duration {
+                    return false;
+                }
+
+                let time_in_pulse = time_in_cycle % period;
+                time_in_pulse < on_time.as_ticks() // in one of the beeps?
+            }
+
+            BeepCycle::Custom { beeps, cycle_duration } => {
+                let total_beeps_duration = beeps.iter().map(|(d, _)| d.as_ticks()).sum();
+                let total_cycle_duration = cycle_duration.as_ticks().max(total_beeps_duration);
+
+                if total_cycle_duration == 0 { return false; }
+                let mut time_in_cycle = elapsed.as_ticks() % total_cycle_duration;
+
+                for (beep_duration, is_on) in *beeps {
+                    let beep_ticks = beep_duration.as_ticks();
+                    if time_in_cycle < beep_ticks {
+                        return *is_on;
+                    }
+                    time_in_cycle -= beep_ticks;
+                }
+                false // In the padding period
+            }
+        }
+    }
 }

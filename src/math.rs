@@ -227,7 +227,7 @@ impl SubAssign for Vec3 {
 
 // ────────────────────────────────── Quat ────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Quat { // TODO: Maybe use nalgebra quaternion?
+pub struct Quat {
     pub w: f64,
     pub x: f64,
     pub y: f64,

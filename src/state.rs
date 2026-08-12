@@ -29,7 +29,7 @@ use crate::sensors::Sensors;
 use crate::types::SensorReadings;
 use crate::orientation::ahrs;
 use crate::orientation::ahrs::AhrsState;
-use crate::output::indication::{LedColor, StateIndicator};
+use crate::output::indication::{BeepCycle, BeepSequence, LedColor, StateIndicator};
 use crate::output::roll_controller;
 use crate::output::roll_controller::RollPid;
 
@@ -69,36 +69,40 @@ pub enum RecoverySubState {
     Landed,
 }
 
+fn standard_beep_cycle<'a>(count: u32, cycle_secs: u64) -> BeepCycle<'a> {
+    BeepCycle::Pulse {
+        count,
+        on_time: Duration::from_millis(100),
+        off_time: Duration::from_millis(100),
+        cycle_duration: Duration::from_secs(cycle_secs),
+    }
+}
+
 impl FlightState {
-    const SILENT: &'static [(Duration, bool)] = &[];
-    const ONE_PER_16S: &'static [(Duration, bool)] = &[
-        (Duration::from_millis(100), true),
-        (Duration::from_secs(16), false), // TODO: make some macro of something like buzzer_pattern!(beeps, cycle_duration) where beeps is a tuple of (beep_duration, beep_on)
-        // TODO: Maybe also make a similar macro for a series of beeps, like with parameters of num beeps, beep length, and time between beeps?
-    ];
+    /// Returns the appropriate state indicator for the current flight state.
     pub fn indicator(&self) -> StateIndicator {
         // TODO: should probably add GPS lock check here
         match &self {
             FlightState::PreLaunch(GroundSubState::Startup) => StateIndicator {
                 led: LedColor::Blue,
-                buzzer: FlightState::SILENT,
+                buzzer: BeepCycle::Silent,
             },
             FlightState::PreLaunch(GroundSubState::ReadyToLaunch) => StateIndicator {
                 led: LedColor::Green,
-                buzzer: FlightState::ONE_PER_16S, // one per 16 seconds
+                buzzer: standard_beep_cycle(1, 16),
             },
             FlightState::Ascent(AscentSubState::Burn) => StateIndicator {
                 led: LedColor::Purple,
-                buzzer: FlightState::SILENT,
+                buzzer: BeepCycle::Silent,
             },
             FlightState::Recovery(RecoverySubState::Landed) => StateIndicator {
                 led: LedColor::Cyan,
-                buzzer: FlightState::SILENT,
+                buzzer: BeepCycle::Silent,
             },
             // TODO: handle errors somehow (fatal: red, non-fatal: orange)
             _ => StateIndicator {
                 led: LedColor::Off,
-                buzzer: FlightState::SILENT,
+                buzzer: BeepCycle::Silent,
             },
         }
     }
