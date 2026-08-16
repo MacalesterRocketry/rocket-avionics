@@ -7,10 +7,10 @@
 
 #![allow(dead_code, unused_variables)]
 
-use defmt::{error, info};
-use embassy_rp::gpio::Output;
+use defmt::{error, info, Debug2Format};
+use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::PIO0;
-use embassy_rp::pio;
+use embassy_rp::{i2c, pio};
 use embassy_rp::pio::Pio;
 use embassy_rp::pio_programs::ws2812;
 use embassy_rp::pio_programs::ws2812::{Grb, PioWs2812, PioWs2812Program, RgbColorOrder};
@@ -22,8 +22,8 @@ use smart_leds::RGB8;
 use uom::si::reciprocal_length::reciprocal_centimeter;
 use crate::config::HAS_DROGUE_CHUTE;
 use crate::math::Deg;
-use crate::{is_critical_failure, is_init_all_complete, is_init_critical_complete, mark_init_complete, mark_init_failed, state, Irqs, Subsystem, FLIGHT_STATE};
-use crate::config::board::{IndicatorsConfig, Neopixel, NUM_LEDS};
+use crate::{is_critical_failure, is_init_all_complete, is_init_critical_complete, mark_init_complete, mark_init_failed, sensors, state, Irqs, Subsystem, FLIGHT_STATE};
+use crate::config::board::{I2cConfig, IndicatorsConfig, Neopixel, PeripheralConfig, NUM_LEDS};
 use crate::errors::handle_unrecoverable_error;
 use crate::sensors::Sensors;
 use crate::types::SensorReadings;
@@ -225,3 +225,60 @@ pub fn roll_program(time_since_ignition: Duration) -> Deg {
     }
 }
 
+pub async fn system_loop(i2c_config: I2cConfig, peripheral_config: PeripheralConfig) {
+    info!("initializing I²C bus");
+    let mut config = i2c::Config::default();
+    config.frequency = 400_000;
+    let i2c = i2c::I2c::new_async(i2c_config.bus, i2c_config.scl, i2c_config.sda, Irqs, config);
+    info!("I²C bus initialized");
+
+    info!("initializing GPIO");
+    let mut eject_button = Input::new(peripheral_config.eject_button, embassy_rp::gpio::Pull::Up);
+    info!("GPIO initialized");
+
+    info!("initializing sensors");
+    let sensors = match sensors::init_all(i2c) {
+        Ok(sensors) => {
+            mark_init_complete(Subsystem::SENSORS);
+            sensors
+        }
+        Err(e) => {
+            error!("Error initializing sensors: {:?}", Debug2Format(&e));
+            mark_init_failed(Subsystem::SENSORS);
+            defmt::panic!("Failed to initialize sensors");
+        }
+    };
+    info!("sensors initialized");
+
+    info!("initializing system state");
+    let mut system = match SystemState::new(sensors) {
+        Ok(system) => {
+            mark_init_complete(Subsystem::BASE_SYSTEM);
+            system
+        }
+        Err(_) => {
+            error!("Failed to initialize system state");
+            mark_init_failed(Subsystem::BASE_SYSTEM);
+            defmt::panic!("Failed to initialize system state");
+        }
+    };
+    // TODO: handle errors with Neopixel notifs and logging and stuff instead of panicking
+    info!("system state initialized");
+
+    // TODO: init servos and PID
+    let mut ticker = Ticker::every(Duration::from_hz(250));
+    loop {
+        ticker.next().await;
+        // TODO: I'm wondering if the whole systemState thing should be split out into like 4-ish loops:
+        //  state handling, sensors, AHRS, and PID/servos. I guess state handling would combine all the data?
+        //  Or maybe just extract PID/servos? But tick() should definitely be more tightly integrated
+        //  with the loop and ticker.
+        //  What I'm thinking now: Sensors and AHRS definitely need to be together (but I need to
+        //  figure out how to handle slower sensors). PID and servos can be slower; it's probably
+        //  fine to be something like 50Hz instead of 400Hz, and it doesn't need to be tightly
+        //  integrated with sensors and AHRS. It can just read the AHRS data at any given moment.
+        //  I'm not totally sure where the state machine should go, but I guess the sensor loop makes sense.
+        //  Actually, it might be a problem to keep AHRS data atomic. I don't know.
+        system.tick().await;
+    }
+}
