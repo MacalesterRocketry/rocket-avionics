@@ -16,9 +16,7 @@ bench = false
 # Firmware deps (no_std, target = thumbv8m.main-none-eabihf)
 # ─────────────────────────────────────────────────────────────────────────────
 [dependencies]
-# Embassy core. RP2350A = "rp235xa" feature (40-pin, like Pico 2 / Feather RP2350).
-# Switch to "rp235xb" if you spin a board around the larger RP2350B (QFN-80).
-embassy-rp        = { version = "0.10", features = ["rp235xb", "time-driver", "critical-section-impl", "binary-info", "rt", "unstable-pac", "defmt", "rom-v2-intrinsics"] }
+embassy-rp        = { version = "0.10", features = ["rp235xb", "time-driver", "critical-section-impl", "binary-info", "rt", "unstable-pac", "defmt", "rom-v2-intrinsics", "chrono"] }
 embassy-executor  = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "defmt"] }
 embassy-time      = { version = "0.5", features = ["defmt", "defmt-timestamp-uptime"] }
 embassy-sync      = { version = "0.8", features = ["defmt"] }
@@ -46,7 +44,7 @@ defmt-rtt    = "1.3"
 libm = "0.2"
 
 # nalgebra is a very commonly used math library
-nalgebra = { version = "0.35", default-features = false, features = ["libm"] }
+nalgebra = { version = "0.35", default-features = false, features = ["libm", "serde-serialize-no-std"] }
 
 # Bitflags for the Error mask (mirrors enum Error : uint16_t bitmask)
 bitflags = "2.11"
@@ -55,18 +53,25 @@ bitflags = "2.11"
 static_cell = "2.1"
 
 # Unit definitions using UOM
-uom = { version = "0.38", default-features = false, features = [ "f64", "si" ] }
+uom = { version = "0.38", default-features = false, features = [ "f64", "si", "serde" ] }
 num-traits = { version = "0.2", default-features = false, features = [ "libm" ] }
 
+# Driver for the u-blox MAX-M10S GNSS module (UART)
+ublox = { version = "0.10", default-features = false, features = ["ubx_proto33", "serde"] }
+
+# Useful datetime library
+chrono = { version = "0.4", default-features = false, features = ["serde"] } # TODO: use chrono?
+
 # Helper for writing to the WS2812 indicator LED
-smart-leds = "0.4.0"
+smart-leds = "0.4"
 
 # SD card over SPI. embedded-sdmmc supports FAT16/32 and is the de-facto choice.
-embedded-sdmmc = { version = "0.9", default-features = false, features = ["defmt-log"] }
+embedded-sdmmc = { version = "0.10", default-features = false, features = ["defmt-log"] }
 
-# NMEA parsing for the MTK3333 GPS. Pulls in heapless; we'll only enable the
-# RMC + GGA sentence parsers to keep flash + RAM cost down.
-nmea = { version = "0.7", default-features = false, features = ["GGA", "RMC"] }
+# serde is used for serializing packets to/from SD card.
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+# postcard is a serde serializer for a compact binary format, which we use for SD card storage.
+postcard = { version = "1.1", features = ["defmt"] }
 
 # Lock-free fixed-size queue for sensor→SD packet handoff between cores.
 heapless = { version = "0.9", features = ["defmt"] }
@@ -77,7 +82,7 @@ heapless = { version = "0.9", features = ["defmt"] }
 lsm6dsox  = { version = "2.1", optional = true }   # gyro + low-G accel
 lis3mdl   = { version = "0.1", optional = true }   # magnetometer TODO: fork and improve the driver, it's not great
 bmp390-rs = { version = "0.4", optional = true }   # barometer and temperature sensor
-adxl3xx  = "0.1.0"
+adxl3xx   = "0.1"
 
 [features]
 default = ["sensors", "hw-v3"]

@@ -152,9 +152,15 @@ pub mod board {
             sda: PIN_20,
             scl: PIN_21,
         },
-        uart: UartConfig {
+        gps: GpsConfig {
             rx: PIN_1,
             tx: PIN_0,
+            bus: UART0,
+        },
+        telemetry: TelemetryConfig {
+            rx: PIN_5,
+            tx: PIN_4,
+            bus: UART1,
         },
         sd: SdConfig {
             sclk: PIN_34,
@@ -166,8 +172,8 @@ pub mod board {
             detect: PIN_40,
         },
         interrupts: InterruptConfig {
-            adxl_int1: PIN_5,
-            adxl_int2: PIN_6,
+            adxl_int1: PIN_7,
+            adxl_int2: PIN_8,
             lsm_int1: PIN_9,
             lsm_int2: PIN_10,
             lis3_int1: PIN_11,
@@ -178,7 +184,7 @@ pub mod board {
             buzzer: PIN_43, // Note: Any changes to this should also be changed in errors.rs
             neopixel: PIN_25,
             neopixel_pio: PIO0,
-            neopixel_channel: DMA_CH0,
+            neopixel_dma: DMA_CH0,
         },
         peripherals: PeripheralConfig {
             eject_button: PIN_24,

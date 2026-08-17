@@ -17,7 +17,7 @@ use crate::config::G;
 use crate::config::board::NUM_LEDS;
 use crate::config::board::{
     AvionicsHardware, I2cConfig, IndicatorsConfig, InterruptConfig, Neopixel, PeripheralConfig,
-    SdConfig, UartConfig,
+    SdConfig, GpsConfig,
 };
 use crate::state::{system_loop, FlightState, SystemState};
 use core::sync::atomic::{AtomicU8, Ordering};
@@ -25,9 +25,9 @@ use defmt::*;
 use defmt_rtt as _;
 use embassy_executor::{Executor, SpawnError, SpawnToken, Spawner};
 use embassy_rp::gpio::{Input, Output};
-use embassy_rp::i2c;
+use embassy_rp::{i2c, uart};
 use embassy_rp::multicore::{spawn_core1, Stack};
-use embassy_rp::peripherals::{DMA_CH0, I2C0, PIO0};
+use embassy_rp::peripherals::{DMA_CH0, DMA_CH1, DMA_CH2, I2C0, PIO0, UART0};
 use embassy_rp::pio::Pio;
 use embassy_rp::pio_programs::ws2812::{Grb, PioWs2812, PioWs2812Program};
 use embassy_rp::{bind_interrupts, dma, pio, pio_programs, Peri, Peripherals};
@@ -41,6 +41,7 @@ use output::indication::indicator_loop;
 use smart_leds::hsv::{hsv2rgb, Hsv};
 use smart_leds::{RGB8, RGBA};
 use static_cell::StaticCell;
+use crate::orientation::gps::gps_loop;
 
 mod config;
 mod errors;
@@ -61,10 +62,11 @@ static mut CORE1_STACK: Stack<4096> = Stack::new();
 
 // Bind the interrupt handler with the peripheral
 bind_interrupts!(struct Irqs {
-    I2C0_IRQ => i2c::InterruptHandler<I2C0>;
-    PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
-    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>;
-});
+    I2C0_IRQ => i2c::InterruptHandler<I2C0>; // I2C for sensors
+    PIO0_IRQ_0 => pio::InterruptHandler<PIO0>; // PIO for NeoPixels
+    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>; // DMA for NeoPixels
+    UART0_IRQ => uart::BufferedInterruptHandler<UART0>; // UART for GPS
+}); // TODO: Extract these types to config.rs
 
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
@@ -146,7 +148,7 @@ async fn main(_spawner: Spawner) -> ! {
         move || {
             spawn_core(
                 EXECUTOR1.init(Executor::new()),
-                core1_main(hw.sd, hw.uart, hw.indicators),
+                core1_main(hw.sd, hw.gps, hw.indicators),
             )
         },
     );
@@ -187,7 +189,7 @@ async fn core0_main(
 #[embassy_executor::task]
 async fn core1_main(
     sd_config: SdConfig,
-    uart_config: UartConfig,
+    gps_config: GpsConfig,
     indicators_config: IndicatorsConfig,
 ) {
     info!("core 1: I/O task starting");
@@ -199,7 +201,7 @@ async fn core1_main(
     embassy_futures::join::join3(
         indicator_loop(indicators_config),
         sd_logging_loop(sd_config),
-        gps_loop(),
+        gps_loop(gps_config),
     ).await;
 }
 
@@ -207,14 +209,6 @@ async fn core1_main(
 async fn sd_logging_loop(sd_config: SdConfig) {
     mark_init_complete(Subsystem::SD_CARD);
     let mut ticker: Ticker = Ticker::every(Duration::from_hz(20));
-    loop {
-        ticker.next().await;
-    }
-}
-
-async fn gps_loop() {
-    mark_init_complete(Subsystem::GPS);
-    let mut ticker: Ticker = Ticker::every(Duration::from_hz(5)); // TODO: should this actually be 5 Hz? What happens if it's slightly off from the GPS clock?
     loop {
         ticker.next().await;
     }

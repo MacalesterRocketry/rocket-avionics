@@ -108,7 +108,7 @@ fn init_indicators(indicators_config: IndicatorsConfig) -> Result<(Output<'stati
     let neopixel: Neopixel = PioWs2812::new(
         &mut common,
         sm0,
-        indicators_config.neopixel_channel,
+        indicators_config.neopixel_dma,
         Irqs,
         indicators_config.neopixel,
         &program,
