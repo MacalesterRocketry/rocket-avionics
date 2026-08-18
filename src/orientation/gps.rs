@@ -16,8 +16,6 @@ use ublox::nav_pvt::proto33::NavPvtRef;
 use ublox::{FixedBuffer, GnssFixType, Parser, ParserError, UbxPacket, UbxPacketMeta, UbxPacketRequest};
 use ublox::cfg_msg::CfgMsgAllPorts;
 
-static PARSER_BUFFER_SIZE: usize = 1024; // basically just a guess
-
 pub struct GpsState {
     pub last_packet_time: Option<Instant>,
     pub last_fix_time: Option<Instant>,
@@ -49,82 +47,91 @@ impl GpsState {
         }
     }
 
-    pub async fn gps_loop(&mut self, gps_config: GpsConfig) {
-        let c = gps_config;
+    fn update(&mut self, nav_pvt: &NavPvtRef) {
+        *self = Self {
+            last_packet_time: Some(Instant::now()),
+            datetime: Some(get_datetime(&nav_pvt)),
+            has_fix: has_gps_fix(&nav_pvt),
+            last_fix_time: if self.has_fix { Some(Instant::now()) } else { self.last_fix_time },
+            latitude: Some(nav_pvt.latitude()),
+            longitude: Some(nav_pvt.longitude()),
+            altitude_sealevel: Some(nav_pvt.height_msl()),
+            vel_down: Some(nav_pvt.vel_down()),
+            vel_east: Some(nav_pvt.vel_east()),
+            vel_north: Some(nav_pvt.vel_north()),
+            satellites: Some(nav_pvt.num_satellites()),
+        }
+    }
+}
 
-        // Configure UART
-        let mut config = uart::Config::default();
-        config.baudrate = 9600; // TODO: Do I want to make it faster?
-        config.parity = uart::Parity::ParityNone;
-        config.stop_bits = uart::StopBits::STOP1;
-        config.data_bits = uart::DataBits::DataBits8;
-        let mut uart = BufferedUart::new(c.bus, c.tx, c.rx, Irqs, &mut [0u8; 128], &mut [0u8; 1024], config);
+pub async fn gps_loop(gps_config: GpsConfig) {
+    let c = gps_config;
 
-        // Configure the module with matching config to UART
-        uart.write(
-            &CfgPrtUartBuilder {
-                portid: UartPortId::Uart1,
-                reserved0: 0,
-                tx_ready: 0,
-                mode: UartMode::new(ublox::cfg_prt::DataBits::Eight, ublox::cfg_prt::Parity::None, ublox::cfg_prt::StopBits::One),
-                baud_rate: 9600,
-                in_proto_mask: ublox::cfg_prt::InProtoMask::UBLOX,
-                out_proto_mask: ublox::cfg_prt::OutProtoMask::UBLOX, // disable NMEA
-                flags: 0,
-                reserved5: 0,
-            }.into_packet_bytes()
-        ).await.expect("Could not configure UBX-CFG-PRT-UART");
-        // Wait a bit for the module to initialize
-        Timer::after(Duration::from_millis(200)).await;
+    // Configure UART
+    let mut config = uart::Config::default();
+    config.baudrate = 9600; // TODO: Do I want to make it faster?
+    config.parity = uart::Parity::ParityNone;
+    config.stop_bits = uart::StopBits::STOP1;
+    config.data_bits = uart::DataBits::DataBits8;
+    let mut uart = BufferedUart::new(c.bus, c.tx, c.rx, Irqs, &mut [0u8; 128], &mut [0u8; 1024], config);
 
-        let mut parser = Parser::<FixedBuffer<PARSER_BUFFER_SIZE>, ublox::proto33::Proto33>::new_fixed();
-        let mut buffer = [0u8; 1024];
+    // Configure the module with matching config to UART
+    uart.write(
+        &CfgPrtUartBuilder {
+            portid: UartPortId::Uart1,
+            reserved0: 0,
+            tx_ready: 0,
+            mode: UartMode::new(ublox::cfg_prt::DataBits::Eight, ublox::cfg_prt::Parity::None, ublox::cfg_prt::StopBits::One),
+            baud_rate: 9600,
+            in_proto_mask: ublox::cfg_prt::InProtoMask::UBLOX,
+            out_proto_mask: ublox::cfg_prt::OutProtoMask::UBLOX, // disable NMEA
+            flags: 0,
+            reserved5: 0,
+        }.into_packet_bytes()
+    ).await.expect("Could not configure UBX-CFG-PRT-UART");
+    // Wait a bit for the module to initialize
+    Timer::after(Duration::from_millis(200)).await;
 
-        mark_init_complete(Subsystem::GPS);
-        let mut ticker: Ticker = Ticker::every(Duration::from_hz(5)); // TODO: should this actually be 5 Hz? What happens if it's slightly off from the GPS clock?
-        // TODO: Or should it be faster? Or maybe use a GPS interrupt?
-        loop {
-            ticker.next().await;
+    // This buffer size is basically just a guess.
+    let mut parser = Parser::<FixedBuffer<1024>, ublox::proto33::Proto33>::new_fixed();
+    let mut buffer = [0u8; 1024];
 
-            match uart.read(&mut buffer).await { // TODO: This is async. Should I just not do a ticker and let it go as fast as it can?
-                Ok(bytes_read) => {
-                    let mut it = parser.consume_ubx(&buffer[..bytes_read]);
-                    loop {
-                        match it.next() {
-                            Some(Ok(UbxPacket::Proto33(p))) => {
-                                info!("Received UBX packet: {}", defmt::Debug2Format(&p));
-                                match p {
-                                    ublox::proto33::PacketRef::NavPvt(nav_pvt) => {
-                                        self.last_packet_time = Some(Instant::now());
-                                        self.datetime = Some(get_datetime(&nav_pvt));
-                                        self.has_fix = has_gps_fix(&nav_pvt);
-                                        self.last_fix_time = if self.has_fix { Some(Instant::now()) } else { self.last_fix_time };
-                                        self.latitude = Some(nav_pvt.latitude());
-                                        self.longitude = Some(nav_pvt.longitude());
-                                        self.altitude_sealevel = Some(nav_pvt.height_msl());
-                                        self.vel_down = Some(nav_pvt.vel_down());
-                                        self.vel_east = Some(nav_pvt.vel_east());
-                                        self.vel_north = Some(nav_pvt.vel_north());
-                                        self.satellites = Some(nav_pvt.num_satellites());
-                                    },
-                                    _ => (),
-                                }
-                            },
-                            Some(Err(e)) => {
-                                info!("Received malformed packet: {}", defmt::Debug2Format(&e));
-                            },
-                            None => {
-                                // The internal buffer is now empty
-                                break;
-                            },
-                        }
+    let mut state = GpsState::new();
+
+    mark_init_complete(Subsystem::GPS);
+    let mut ticker: Ticker = Ticker::every(Duration::from_hz(5)); // TODO: should this actually be 5 Hz? What happens if it's slightly off from the GPS clock?
+    // TODO: Or should it be faster? Or maybe use a GPS interrupt?
+    loop {
+        ticker.next().await;
+
+        match uart.read(&mut buffer).await { // TODO: This is async. Should I just not do a ticker and let it go as fast as it can?
+            Ok(bytes_read) => {
+                let mut it = parser.consume_ubx(&buffer[..bytes_read]);
+                loop {
+                    match it.next() {
+                        Some(Ok(UbxPacket::Proto33(p))) => {
+                            info!("Received UBX packet: {}", defmt::Debug2Format(&p));
+                            match p {
+                                ublox::proto33::PacketRef::NavPvt(nav_pvt) => {
+                                    state.update(&nav_pvt);
+                                },
+                                _ => (),
+                            }
+                        },
+                        Some(Err(e)) => {
+                            info!("Received malformed packet: {}", defmt::Debug2Format(&e));
+                        },
+                        None => {
+                            // The internal buffer is now empty
+                            break;
+                        },
                     }
-                },
-                Err(e) => {
-                    info!("Error reading from serial port: {}", defmt::Debug2Format(&e));
-                    break;
-                },
-            }
+                }
+            },
+            Err(e) => {
+                info!("Error reading from serial port: {}", defmt::Debug2Format(&e));
+                break;
+            },
         }
     }
 }
