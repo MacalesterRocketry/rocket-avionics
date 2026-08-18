@@ -1,6 +1,13 @@
-// TODO: Note: This is untested. We don't have the GPS module yet.
+//! GPS driver for the u-blox MAX-M10S.
+//!
+//! This module provides a driver for the u-blox MAX-M10S GPS/GNSS module, which is used to
+//! obtain position, velocity, and time information.
+//!
+//! TODO: Note: This is untested. We don't have the GPS module yet.
+
 #![allow(dead_code, unused_variables)]
 
+use core::ops::BitAnd;
 use crate::config::board::GpsConfig;
 use crate::{Irqs, Subsystem, mark_init_complete, mark_init_failed};
 use chrono::prelude::*;
@@ -9,13 +16,21 @@ use defmt::{Format, info};
 use embassy_executor::Spawner;
 use embassy_rp::uart;
 use embassy_rp::uart::{Async, BufferedUart, Uart, UartRx, UartTx};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant, Ticker, Timer};
 use embedded_io_async::{Read, Write};
+use serde::{Deserialize, Serialize};
+use ublox::cfg_msg::{CfgMsgAllPorts, CfgMsgAllPortsBuilder, CfgMsgSinglePortBuilder};
 use ublox::cfg_prt::{CfgPrtUartBuilder, UartMode, UartPortId};
-use ublox::nav_pvt::proto33::NavPvtRef;
+use ublox::cfg_rate::{AlignmentToReferenceTime, CfgRateBuilder};
+use ublox::nav_pvt::proto33::{NavPvt, NavPvtRef};
 use ublox::{FixedBuffer, GnssFixType, Parser, ParserError, UbxPacket, UbxPacketMeta, UbxPacketRequest};
-use ublox::cfg_msg::CfgMsgAllPorts;
+use ublox::nav_pvt::common::NavPvtFlags;
 
+pub static GPS_STATE: Watch<CriticalSectionRawMutex, GpsState, 3> = Watch::new();
+
+#[derive(Clone, Copy, Debug, Format)]
 pub struct GpsState {
     pub last_packet_time: Option<Instant>,
     pub last_fix_time: Option<Instant>,
@@ -50,7 +65,7 @@ impl GpsState {
     fn update(&mut self, nav_pvt: &NavPvtRef) {
         *self = Self {
             last_packet_time: Some(Instant::now()),
-            datetime: Some(get_datetime(&nav_pvt)),
+            datetime: get_datetime(&nav_pvt),
             has_fix: has_gps_fix(&nav_pvt),
             last_fix_time: if self.has_fix { Some(Instant::now()) } else { self.last_fix_time },
             latitude: Some(nav_pvt.latitude()),
@@ -60,7 +75,8 @@ impl GpsState {
             vel_east: Some(nav_pvt.vel_east()),
             vel_north: Some(nav_pvt.vel_north()),
             satellites: Some(nav_pvt.num_satellites()),
-        }
+        };
+        GPS_STATE.sender().send(self.clone());
     }
 }
 
@@ -91,28 +107,46 @@ pub async fn gps_loop(gps_config: GpsConfig) {
     ).await.expect("Could not configure UBX-CFG-PRT-UART");
     // Wait a bit for the module to initialize
     Timer::after(Duration::from_millis(200)).await;
+    // Set UBX-CFG-RATE to 100ms
+    uart.write(
+        &CfgRateBuilder {
+            measure_rate_ms: 100, // measure every 100ms
+            nav_rate: 1, // produce a navigation solution every 1 measurement
+            time_ref: AlignmentToReferenceTime::Utc, // UTC time has leap seconds, while GPS time doesn't.
+                                                     // If this is ever used for a monotonic clock, this needs to be changed.
+        }.into_packet_bytes()
+    ).await.expect("Could not configure UBX-CFG-RATE");
+    Timer::after(Duration::from_millis(50)).await;
+    // Set UBX-CFG-MSG to enable NAV-PVT on UART1
+    uart.write(
+        &CfgMsgSinglePortBuilder::set_rate_for::<NavPvt>(1).into_packet_bytes()
+    ).await.expect("Could not configure UBX-CFG-MSG for NAV-PVT");
+    Timer::after(Duration::from_millis(50)).await;
 
-    // This buffer size is basically just a guess.
+    // These buffer sizes are basically just a guess.
+    // The UART buffer stores the raw bytes from the UART, and the parser buffer stores the parsed
+    // packets before they've been processed. The sizes don't need to be the same.
+    let mut uart_buffer = [0u8; 1024];
     let mut parser = Parser::<FixedBuffer<1024>, ublox::proto33::Proto33>::new_fixed();
-    let mut buffer = [0u8; 1024];
 
     let mut state = GpsState::new();
 
     mark_init_complete(Subsystem::GPS);
-    let mut ticker: Ticker = Ticker::every(Duration::from_hz(5)); // TODO: should this actually be 5 Hz? What happens if it's slightly off from the GPS clock?
-    // TODO: Or should it be faster? Or maybe use a GPS interrupt?
     loop {
-        ticker.next().await;
-
-        match uart.read(&mut buffer).await { // TODO: This is async. Should I just not do a ticker and let it go as fast as it can?
+        match uart.read(&mut uart_buffer).await {
             Ok(bytes_read) => {
-                let mut it = parser.consume_ubx(&buffer[..bytes_read]);
+                let mut it = parser.consume_ubx(&uart_buffer[..bytes_read]);
                 loop {
                     match it.next() {
                         Some(Ok(UbxPacket::Proto33(p))) => {
-                            info!("Received UBX packet: {}", defmt::Debug2Format(&p));
                             match p {
                                 ublox::proto33::PacketRef::NavPvt(nav_pvt) => {
+                                    // TODO: I'm not confident that every one of these packets
+                                    //  will include all the data we need. How can I find if it
+                                    //  does or not?
+                                    if nav_pvt.flags().contains(NavPvtFlags::GPS_FIX_OK) {
+
+                                    }
                                     state.update(&nav_pvt);
                                 },
                                 _ => (),
@@ -161,10 +195,19 @@ fn has_gps_fix(nav_pvt: &NavPvtRef) -> bool {
     }
 }
 
-fn get_datetime(nav_pvt: &NavPvtRef) -> DateTime<Utc> {
-    NaiveDate::from_ymd_opt(nav_pvt.year() as i32, nav_pvt.month() as u32, nav_pvt.day() as u32)
-        .unwrap() // TODO: remove unwrap()
-        .and_hms_nano_opt(nav_pvt.hour() as u32, nav_pvt.min() as u32, nav_pvt.sec() as u32, nav_pvt.nanosec() as u32)
-        .unwrap()
-        .and_utc()
+fn get_datetime(nav_pvt: &NavPvtRef) -> Option<DateTime<Utc>> {
+    let date = NaiveDate::from_ymd_opt(
+        nav_pvt.year() as i32,
+        nav_pvt.month() as u32,
+        nav_pvt.day() as u32
+    )?;
+
+    let time = date.and_hms_nano_opt(
+        nav_pvt.hour() as u32,
+        nav_pvt.min() as u32,
+        nav_pvt.sec() as u32,
+        nav_pvt.nanosec() as u32
+    )?;
+
+    Some(time.and_utc())
 }

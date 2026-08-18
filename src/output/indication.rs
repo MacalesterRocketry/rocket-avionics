@@ -50,7 +50,7 @@ pub struct StateIndicator {
 pub async fn indicator_loop(
     indicators_config: IndicatorsConfig,
 ) {
-    let (mut buzzer, mut neopixel, mut receiver) = match init_indicators(indicators_config) {
+    let (mut buzzer, mut neopixel, mut state_receiver) = match init_indicators(indicators_config) {
         Ok(return_val) => {
             mark_init_complete(Subsystem::INDICATORS);
             return_val
@@ -64,11 +64,11 @@ pub async fn indicator_loop(
 
     // Every 20Hz, check the state and proceed with the according buzzer pattern.
     let mut ticker = Ticker::every(Duration::from_hz(20));
-    let mut current_state = receiver.get().await;
+    let mut current_state = state_receiver.get().await;
     let mut entered_at = Instant::now();
     loop {
         ticker.next().await;
-        let state_change = receiver.try_changed();
+        let state_change = state_receiver.try_changed();
         match state_change {
             Some(new_state) => { // state changed
                 info!("State changed: {:?} -> {:?}", current_state, new_state);
@@ -115,8 +115,7 @@ fn init_indicators(indicators_config: IndicatorsConfig) -> Result<(Output<'stati
     );
     info!("NeoPixel initialized");
 
-    let state_receiver_option = FLIGHT_STATE.receiver();
-    let receiver = match state_receiver_option {
+    let receiver = match FLIGHT_STATE.receiver() {
         Some(receiver) => {
             info!("Flight state receiver initialized");
             receiver

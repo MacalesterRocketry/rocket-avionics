@@ -42,6 +42,7 @@ use smart_leds::hsv::{hsv2rgb, Hsv};
 use smart_leds::{RGB8, RGBA};
 use static_cell::StaticCell;
 use crate::orientation::gps::gps_loop;
+use crate::output::sdcard::sd_logging_loop;
 
 mod config;
 mod errors;
@@ -196,20 +197,10 @@ async fn core1_main(
 
     // TODO:
     //   • init SD card (SPI1 @ 50 MHz, embedded-sdmmc::VolumeManager)
-    //   • init UART1 for GPS @ 9600 baud, send PMTK config
 
     embassy_futures::join::join3(
         indicator_loop(indicators_config),
         sd_logging_loop(sd_config),
         gps_loop(gps_config),
     ).await;
-}
-
-// TODO: All of these should be moved to their own files and actually implemented.
-async fn sd_logging_loop(sd_config: SdConfig) {
-    mark_init_complete(Subsystem::SD_CARD);
-    let mut ticker: Ticker = Ticker::every(Duration::from_hz(20));
-    loop {
-        ticker.next().await;
-    }
 }

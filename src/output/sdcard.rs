@@ -13,6 +13,10 @@
 
 #![allow(dead_code, unused_variables)]
 
+use defmt::error;
+use embassy_time::{Duration, Ticker};
+use crate::config::board::SdConfig;
+use crate::{mark_init_failed, FLIGHT_STATE, Subsystem, mark_init_complete};
 use crate::log_packets::PacketType;
 
 /// Enum of every payload variant that can be pushed onto the SD log channel.
@@ -30,4 +34,30 @@ pub enum LogEntry {
 
 pub fn log_packet(_pkt: PacketType, _entry: LogEntry, _micros: u64) {
     // TODO: enqueue onto static SD channel.
+}
+
+pub async fn sd_logging_loop(sd_config: SdConfig) {
+    let mut gps_receiver = FLIGHT_STATE.receiver();
+    if gps_receiver.is_none() {
+        error!("Failed to get GPS receiver; have too many receivers been initialized?");
+        mark_init_failed(Subsystem::GPS);
+        // We can actually continue, we just don't log GPS
+    };
+
+    mark_init_complete(Subsystem::SD_CARD);
+    let mut ticker: Ticker = Ticker::every(Duration::from_hz(20));
+    loop {
+        ticker.next().await;
+        if gps_receiver.is_some() {
+            match gps_receiver.as_mut() {
+                Some(receiver) => {
+                    let gps_state = receiver.get().await;
+                    // TODO: log GPS state to SD card
+                }
+                None => {
+                    error!("Failed to get GPS receiver");
+                }
+            }
+        }
+    }
 }

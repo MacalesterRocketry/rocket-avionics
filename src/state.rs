@@ -29,6 +29,7 @@ use crate::sensors::Sensors;
 use crate::types::SensorReadings;
 use crate::orientation::ahrs;
 use crate::orientation::ahrs::AhrsState;
+use crate::orientation::gps::{GpsState, GPS_STATE};
 use crate::output::indication::{BeepCycle, BeepSequence, LedColor, StateIndicator};
 use crate::output::roll_controller;
 use crate::output::roll_controller::RollPid;
@@ -36,6 +37,7 @@ use crate::output::roll_controller::RollPid;
 pub struct SystemState<'a, I2C: embedded_hal::i2c::I2c> {
     pub state: Receiver<'a, CriticalSectionRawMutex, FlightState, 2>,
     pub ahrs: AhrsState,
+    pub gps: Receiver<'a, CriticalSectionRawMutex, GpsState, 3>,
     pub roll_pid: RollPid,
     pub sensors: Sensors<I2C>,
     pub(crate) ignition_time: Option<Instant>,
@@ -53,7 +55,13 @@ pub enum FlightState {
 #[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
 pub enum GroundSubState {
     Startup,
-    ReadyToLaunch,
+    ReadyToLaunch(ReadyToLaunchSubState),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
+pub enum ReadyToLaunchSubState {
+    WaitingForGPS,
+    GPSLock,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
@@ -87,9 +95,15 @@ impl FlightState {
                 led: LedColor::Blue,
                 buzzer: BeepCycle::Silent,
             },
-            FlightState::PreLaunch(GroundSubState::ReadyToLaunch) => StateIndicator {
-                led: LedColor::Green,
-                buzzer: standard_beep_cycle(1, 16),
+            FlightState::PreLaunch(GroundSubState::ReadyToLaunch(gps_state)) => match gps_state {
+                ReadyToLaunchSubState::WaitingForGPS => StateIndicator {
+                    led: LedColor::Green,
+                    buzzer: standard_beep_cycle(1, 8), // TODO: should probably eventually rethink this, but fine for now
+                },
+                ReadyToLaunchSubState::GPSLock => StateIndicator {
+                    led: LedColor::Green,
+                    buzzer: standard_beep_cycle(1, 16),
+                },
             },
             FlightState::Ascent(AscentSubState::Burn) => StateIndicator {
                 led: LedColor::Purple,
@@ -117,9 +131,17 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
                 return Err(())
             }
         };
+        let gps = match GPS_STATE.receiver() {
+            Some(receiver) => receiver,
+            None => {
+                error!("Failed to get GPS state receiver; have too many receivers been initialized?");
+                return Err(())
+            }
+        };
         Ok(Self {
             state,
             ahrs: AhrsState::default(),
+            gps,
             roll_pid: RollPid::default(),
             sensors,
             ignition_time: None,
@@ -150,12 +172,24 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
             FlightState::PreLaunch(sub) => match sub {
                 GroundSubState::Startup => {
                     if is_init_all_complete() { // TODO: AHRS should probably signal if it's ready too
-                        self.transition_to(FlightState::PreLaunch(GroundSubState::ReadyToLaunch));
+                        self.transition_to(FlightState::PreLaunch(GroundSubState::ReadyToLaunch(ReadyToLaunchSubState::WaitingForGPS)));
                     }
                 }
-                GroundSubState::ReadyToLaunch => {
+                GroundSubState::ReadyToLaunch(gps_state) => {
                     if sensor_data.has_launched() {
                         self.transition_to(FlightState::Ascent(AscentSubState::Burn));
+                    }
+                    match gps_state {
+                        ReadyToLaunchSubState::WaitingForGPS => {
+                            if self.gps.get().await.has_fix {
+                                self.transition_to(FlightState::PreLaunch(GroundSubState::ReadyToLaunch(ReadyToLaunchSubState::GPSLock)));
+                            }
+                        },
+                        ReadyToLaunchSubState::GPSLock => {
+                            if !self.gps.get().await.has_fix {
+                                self.transition_to(FlightState::PreLaunch(GroundSubState::ReadyToLaunch(ReadyToLaunchSubState::WaitingForGPS)));
+                            }
+                        }
                     }
                 }
             },
@@ -176,7 +210,7 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
                     AscentSubState::Coast => {
                         // TODO: is apogee enough? do I need to do something more precise to detect drogue?
                         if self.ahrs.velocity_earth.z < 0.0 { // Apogee detected
-                            if HAS_DROGUE_CHUTE {
+                            if HAS_DROGUE_CHUTE { // TODO: How does Rust do things like this? Features?
                                 self.transition_to(FlightState::Recovery(RecoverySubState::DrogueDeploy));
                             } else {
                                 self.transition_to(FlightState::Recovery(RecoverySubState::MainDeploy))
@@ -198,6 +232,7 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
 
     fn transition_to(&mut self, next_state: FlightState) {
         // TODO: log
+        info!("transitioning to state {:?}", next_state);
         if next_state == FlightState::Ascent(AscentSubState::Burn) {
             self.ahrs.launch();
             self.roll_pid.launch(self.ahrs);
