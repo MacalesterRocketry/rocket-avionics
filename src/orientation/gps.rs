@@ -66,7 +66,7 @@ impl GpsState {
         *self = Self {
             last_packet_time: Some(Instant::now()),
             datetime: get_datetime(&nav_pvt),
-            has_fix: has_gps_fix(&nav_pvt),
+            has_fix: nav_pvt.flags().contains(NavPvtFlags::GPS_FIX_OK),
             last_fix_time: if self.has_fix { Some(Instant::now()) } else { self.last_fix_time },
             latitude: Some(nav_pvt.latitude()),
             longitude: Some(nav_pvt.longitude()),
@@ -144,9 +144,6 @@ pub async fn gps_loop(gps_config: GpsConfig) {
                                     // TODO: I'm not confident that every one of these packets
                                     //  will include all the data we need. How can I find if it
                                     //  does or not?
-                                    if nav_pvt.flags().contains(NavPvtFlags::GPS_FIX_OK) {
-
-                                    }
                                     state.update(&nav_pvt);
                                 },
                                 _ => (),
@@ -167,31 +164,6 @@ pub async fn gps_loop(gps_config: GpsConfig) {
                 break;
             },
         }
-    }
-}
-
-fn has_gps_fix(nav_pvt: &NavPvtRef) -> bool {
-    match nav_pvt.fix_type() {
-        GnssFixType::NoFix => {
-            info!("No GPS fix");
-            false
-        },
-        GnssFixType::TimeOnlyFix => {
-            info!("Time only");
-            false
-        },
-        GnssFixType::Fix2D => {
-            info!("2D GPS");
-            false
-        },
-        GnssFixType::Fix3D => {
-            info!("3D GPS");
-            true
-        },
-        _ => {
-            info!("Unknown fix type: {}", nav_pvt.fix_type() as u8);
-            false
-        },
     }
 }
 
