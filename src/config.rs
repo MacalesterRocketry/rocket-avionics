@@ -39,7 +39,7 @@ pub const MAG_BIAS_Z: f64 = -33.43;
 
 // High-G (ADXL375) zero offsets. NOTE from C++ source: the ADXL375 may apply
 // internal gravity correction — verify on bench before trusting these.
-pub const HIGHG_BIAS_X: f64 = 9.8;
+pub const HIGHG_BIAS_X: f64 = 9.8; // TODO: implement this, I don't think it's currently used
 pub const HIGHG_BIAS_Y: f64 = 7.85;
 pub const HIGHG_BIAS_Z: f64 = 9.8 - G;
 pub const HIGHG_TRIM_X: i8 = -5; // raw LSB counts, not m/s²
@@ -76,13 +76,23 @@ pub const ROLL_PID_KD: f64 = 20.8804;
 
 // ─────────────────────────────── thresholds ────────────────────────────────
 pub const LAUNCH_ACCEL_THRESHOLD_G: f64 = 4.0;
-/// Mechanical sweep of the smaller servo, degrees.
+/// Mechanical range of the servo in degrees when unrestricted by the airframe.
 pub const SERVO_DEGREE_RANGE: f64 = 100.0;
+/// These represent the physical limits of the servo where it is currently placed and are relative to inline with the fin.
 pub const SERVO_MAX_ANGLE: f64 = 50.0;
 pub const SERVO_MIN_ANGLE: f64 = -50.0;
-pub const SERVO_NEUTRAL_ANGLE: f64 = -3.0;
-pub const SERVO_MICROS_MIN: u32 = 1000;
-pub const SERVO_MICROS_MAX: u32 = 2000;
+/// These represent the logical limits of what control signals can be sent to the servo.
+pub const SERVO_MICROS_MIN: u16 = 1000;
+pub const SERVO_MICROS_MAX: u16 = 2000;
+
+/// Per-fin mechanical zero offset in degrees.
+/// Shifts the whole window, so one end of the range ends up with a few degrees cut off.
+pub const SERVO_TRIM: board::Trims = board::Trims {
+    xplus: -3.0,
+    xminus: -3.0,
+    yplus: -3.0,
+    yminus: -3.0,
+};
 /// Datasheet stall torque at 7.4 V (N·m).
 pub const SERVO_MAX_TORQUE: f64 = 0.51;
 
@@ -93,53 +103,18 @@ pub const ACCELEROMETER_SWITCH_THRESHOLD: f64 = 15.9 * G;
 pub const BATTERY_VOLTAGE_R1: f64 = 100_000.0;
 pub const BATTERY_VOLTAGE_R2: f64 = 100_000.0;
 
-macro_rules! define_hardware {
-    (
-        $main_struct:ident {
-            // Match all grouped subsystems (e.g., I2cConfig, SdConfig)
-            $(
-                $group_field:ident : $group_struct:ident {
-                    $( $sub_field:ident : $sub_pin:ident ),* $(,)?
-                }
-            ),* $(,)?
-        }
-    ) => {
-        // 1. Generate all the sub-structs
-        $(
-            pub struct $group_struct {
-                $( pub $sub_field: embassy_rp::Peri<'static, embassy_rp::peripherals::$sub_pin> ),*
-            }
-        )*
-
-        // 2. Generate the main hardware struct
-        pub struct $main_struct {
-            $( pub $group_field: $group_struct, )*
-        }
-
-        // 3. Generate the partial-move extraction macro
-        #[macro_export]
-        macro_rules! take_hardware {
-            ($p:expr) => {
-                crate::config::board::$main_struct {
-                    $(
-                        $group_field: crate::config::board::$group_struct {
-                            $( $sub_field: $p.$sub_pin ),*
-                        },
-                    )*
-                }
-            }
-        }
-    };
-}
-
 #[cfg(feature = "hw-v3")]
 pub mod board {
     use embassy_rp::Peri;
     use embassy_rp::peripherals::*;
     use embassy_rp::pio_programs::ws2812::PioWs2812;
+    use crate::define_hardware;
 
     /// External high-speed crystal on the Metro RP2350 board is 12 MHz, as with most RP2350 boards
     pub(crate) const XTAL_FREQ_HZ: u32 = 12_000_000u32;
+    /// System clock after `embassy_rp::init(Default::default())`. Anything
+    /// deriving a peripheral clock divider (e.g. servo PWM) keys off this.
+    pub(crate) const SYS_CLK_HZ: u32 = 150_000_000;
     pub(crate) const NUM_LEDS: usize = 1;
     pub type NeopixelColorOrder = embassy_rp::pio_programs::ws2812::Grb;
     pub type Neopixel = PioWs2812<'static, PIO0, 0, NUM_LEDS, NeopixelColorOrder>;
@@ -189,6 +164,10 @@ pub mod board {
         peripherals: PeripheralConfig {
             eject_button: PIN_24,
         },
+    }
+    servos servos: ServoConfig -> Servos {
+        x_slice: PWM_SLICE5 { a: xplus = PIN_26, b: xminus = PIN_27 },
+        y_slice: PWM_SLICE6 { a: yplus = PIN_28, b: yminus = PIN_29 },
     });
 }
 
@@ -196,6 +175,8 @@ pub mod board {
 pub mod board {
     /// Adafruit Feather RP2040 Adalogger's external high-speed crystal is 12 MHz
     pub const XTAL_FREQ_HZ: u32 = 12_000_000;
+    /// RP2040 default system clock.
+    pub(crate) const SYS_CLK_HZ: u32 = 125_000_000;
     pub(crate) const NUM_LEDS: usize = 1;
     pub type NeopixelColorOrder = embassy_rp::pio_programs::ws2812::Grb;
 
@@ -238,11 +219,14 @@ pub mod board {
             turn_signal_left: PIN_26,
             turn_signal_right: PIN_27,
         },
-        servos: ServoConfig {
-            xplus: PIN_25,
-            xminus: PIN_14,
-            yplus: PIN_15,
-            yminus: PIN_8,
-        },
+    }
+    // Unlike v3, v2's servo pins do not pair up by axis: GPIO 8/25 share slice
+    // 4 and GPIO 14/15 share slice 7, so each slice straddles the X and Y
+    // pairs. Harmless — the fins are addressed by name, not by slice — but it
+    // is why the slice fields are named after the slice here. Untested: this
+    // board is RP2040 and the crate currently builds for rp235xb.
+    servos servos: ServoConfig -> Servos {
+        slice4: PWM_SLICE4 { a: yminus = PIN_8,  b: xplus = PIN_25 },
+        slice7: PWM_SLICE7 { a: xminus = PIN_14, b: yplus = PIN_15 },
     });
 }

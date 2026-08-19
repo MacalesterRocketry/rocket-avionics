@@ -14,7 +14,7 @@
 extern crate uom;
 
 use crate::config::G;
-use crate::config::board::NUM_LEDS;
+use crate::config::board::{ServoConfig, NUM_LEDS};
 use crate::config::board::{
     AvionicsHardware, I2cConfig, IndicatorsConfig, InterruptConfig, Neopixel, PeripheralConfig,
     SdConfig, GpsConfig,
@@ -43,6 +43,7 @@ use smart_leds::{RGB8, RGBA};
 use static_cell::StaticCell;
 use crate::orientation::gps::gps_loop;
 use crate::output::sdcard::sd_logging_loop;
+use crate::output::servo::servos_loop;
 
 mod config;
 mod errors;
@@ -53,6 +54,7 @@ mod output;
 mod sensors;
 mod state;
 mod types;
+mod hardware_macro;
 
 // 8 KiB of stack for core 1. Lives in SCRATCH_X (see memory.x) so it doesn't
 // share cache lines with the AHRS data on core 0. If a panic-probe trace shows
@@ -76,11 +78,13 @@ pub static FLIGHT_STATE: Watch<CriticalSectionRawMutex, FlightState, 2> = Watch:
 
 bitflags! {
     pub struct Subsystem: u8 {
-        const BASE_SYSTEM = 1 << 0;
-        const INDICATORS  = 1 << 1;
-        const SD_CARD     = 1 << 2;
-        const GPS         = 1 << 3;
-        const SENSORS     = 1 << 4; // core 0
+        const BASE_SYSTEM = 1 << 0; // core 0
+        const SENSORS     = 1 << 1;
+        const SERVOS      = 1 << 2;
+
+        const INDICATORS  = 1 << 5; // core 1
+        const SD_CARD     = 1 << 6;
+        const GPS         = 1 << 7;
     }
 }
 pub static FLIGHT_CRITICAL_SUBSYSTEMS: &[Subsystem] = &[Subsystem::BASE_SYSTEM, Subsystem::SENSORS];
@@ -156,7 +160,7 @@ async fn main(_spawner: Spawner) -> ! {
 
     spawn_core(
         EXECUTOR0.init(Executor::new()),
-        core0_main(hw.i2c, hw.interrupts, hw.peripherals),
+        core0_main(hw.i2c, hw.interrupts, hw.peripherals, hw.servos),
     );
 }
 
@@ -180,10 +184,14 @@ async fn core0_main(
     i2c_config: I2cConfig,
     interrupt_config: InterruptConfig,
     peripheral_config: PeripheralConfig,
+    servos_config: ServoConfig,
 ) {
     info!("core 0: avionics task starting");
 
-    system_loop(i2c_config, peripheral_config).await;
+    embassy_futures::join::join(
+        system_loop(i2c_config, peripheral_config),
+        servos_loop(servos_config),
+    ).await;
 }
 
 /// Core 1: everything slow or where timing is unimportant: GPS, SD writes, and indication.

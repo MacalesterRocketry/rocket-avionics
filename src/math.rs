@@ -17,17 +17,17 @@ pub type Rad = f64;
 pub type Deg = f64;
 
 #[inline]
-pub fn rad_to_deg(r: Rad) -> Deg {
+pub const fn rad_to_deg(r: Rad) -> Deg {
     r * 180.0 / core::f64::consts::PI
 }
 
 #[inline]
-pub fn deg_to_rad(d: Deg) -> Rad {
+pub const fn deg_to_rad(d: Deg) -> Rad {
     d * core::f64::consts::PI / 180.0
 }
 
 #[inline]
-pub fn clamp(x: f64, lo: f64, hi: f64) -> f64 {
+pub const fn clamp(x: f64, lo: f64, hi: f64) -> f64 {
     if x < lo {
         lo
     } else if x > hi {
