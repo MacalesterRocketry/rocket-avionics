@@ -61,8 +61,8 @@
         //    both compare registers at once).
         pub struct $servo_outputs {
             $(
-                pub $a_field: crate::output::servo::Fin,
-                pub $b_field: crate::output::servo::Fin,
+                pub $a_field: crate::output::servo::ServoOutput,
+                pub $b_field: crate::output::servo::ServoOutput,
             )*
         }
 
@@ -92,8 +92,8 @@
                 )*
                 $servo_outputs {
                     $(
-                        $a_field: crate::output::servo::Fin::new($a_field, trims.$a_field),
-                        $b_field: crate::output::servo::Fin::new($b_field, trims.$b_field),
+                        $a_field: crate::output::servo::ServoOutput::new($a_field, trims.$a_field),
+                        $b_field: crate::output::servo::ServoOutput::new($b_field, trims.$b_field),
                     )*
                 }
             }
@@ -103,7 +103,7 @@
             /// Every fin, in declaration order. For sweeps and for commands
             /// that apply to all fins at once; individual fins are just named
             /// fields.
-            pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut crate::output::servo::Fin> {
+            pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut crate::output::servo::ServoOutput> {
                 [ $( &mut self.$a_field, &mut self.$b_field, )* ].into_iter()
             }
         }

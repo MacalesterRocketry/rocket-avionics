@@ -142,7 +142,7 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
             state,
             ahrs: AhrsState::default(),
             gps,
-            roll_pid: RollPid::default(),
+            roll_pid: RollPid::new(),
             sensors,
             ignition_time: None,
             last_tick: Instant::now(),

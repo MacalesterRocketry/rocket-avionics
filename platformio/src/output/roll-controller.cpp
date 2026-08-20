@@ -80,8 +80,8 @@ void update_roll(const Deg target_angle, const Quat& base_orientation) {
 
   // CONTROL LOOP (Until target reached)
   static uint64_t last_time = micros64();
+  const uint64_t now_micros = micros64();
   if (abs(target_angle - current_angle) > 1) {
-    const uint64_t now_micros = micros64();
     const double dt = (now_micros - last_time) / 1000000.0;
     const double fin_deflection_angle = calculate_deflection_pid(qtarget, dt);
     logRollControl(target_angle, current_angle, fin_deflection_angle);
@@ -99,7 +99,6 @@ void update_roll(const Deg target_angle, const Quat& base_orientation) {
     for (const ServoID servo : servos) {
       set_servo_angle(servo, fin_deflection_angle);
     }
-
-    last_time = now_micros;
   }
+  last_time = now_micros;
 }

@@ -8,10 +8,10 @@
 #![allow(clippy::many_single_char_names)]
 
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
-
+use embassy_time::Duration;
 // libm provides no_std math intrinsics. On host (cargo test) we still use libm
 // for bit-identical behavior with the firmware build.
-use libm::{atan2, cos, sin, sqrt};
+use libm::{asin, atan2, cos, sin, sqrt};
 
 pub type Rad = f64;
 pub type Deg = f64;
@@ -54,12 +54,12 @@ impl Vec3 {
     }
 
     #[inline]
-    pub fn dot(self, v: Vec3) -> f64 {
+    pub const fn dot(self, v: Vec3) -> f64 {
         self.x * v.x + self.y * v.y + self.z * v.z
     }
 
     #[inline]
-    pub fn cross(self, v: Vec3) -> Vec3 {
+    pub const fn cross(self, v: Vec3) -> Vec3 {
         Vec3 {
             x: self.y * v.z - self.z * v.y,
             y: self.z * v.x - self.x * v.z,
@@ -80,7 +80,7 @@ impl Vec3 {
 
     /// Build a pure quaternion `[w, x, y, z]` from this vector.
     #[inline]
-    pub fn to_quat(self, w: f64) -> Quat {
+    pub const fn to_quat(self, w: f64) -> Quat {
         Quat::new(w, self.x, self.y, self.z)
     }
 }
@@ -255,7 +255,7 @@ impl Quat {
 
     /// Hamilton-conjugate. For a unit quaternion this is also the inverse.
     #[inline]
-    pub fn conjugate(self) -> Quat {
+    pub const fn conjugate(self) -> Quat {
         Quat::new(self.w, -self.x, -self.y, -self.z)
     }
 
@@ -408,39 +408,70 @@ impl From<Quat> for Grad4 {
 
 // ───────────────────── axis-angle and Euler conversions ─────────────────────
 #[inline]
-pub fn axis_angle_to_quat(axis: Vec3, angle: Rad) -> Quat {
+pub fn axis_angle_rad_to_quat(axis: Vec3, angle: Rad) -> Quat {
     let half = angle * 0.5;
     let s = sin(half);
     Quat::new(cos(half), axis.x * s, axis.y * s, axis.z * s)
 }
 
+// TODO: These are all based on the wrong-ish sensor orientation. We should fix this all and transform
+//  it in the sensor reads instead.
 #[inline]
-pub fn roll_rad(q: Quat) -> Rad {
-    // Sign matches the C++ source (`-atan2(...)`).
-    -atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+pub fn calculate_roll_rad(q: Quat) -> Rad {
+    -atan2(2.0 * (q.w * q.z + q.x * q.y),
+           1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 }
 
 #[inline]
-pub fn pitch_rad(q: Quat) -> Rad {
-    atan2(2.0 * (q.w * q.x + q.y * q.z), 1.0 - 2.0 * (q.x * q.x + q.y * q.y))
+pub fn calculate_pitch_rad(q: Quat) -> Rad {
+    atan2(2.0 * (q.w * q.x + q.y * q.z),
+          1.0 - 2.0 * (q.x * q.x + q.y * q.y))
 }
 
 #[inline]
-pub fn yaw_rad(q: Quat) -> Rad {
-    // `asin` via libm
-    libm::asin(2.0 * (q.w * q.y - q.z * q.x))
+pub fn calculate_yaw_rad(q: Quat) -> Rad {
+    asin(2.0 * (q.w * q.y - q.z * q.x))
 }
 
 #[inline]
-pub fn roll_deg(q: Quat) -> Deg { rad_to_deg(roll_rad(q)) }
+pub fn calculate_roll_deg(q: Quat) -> Deg { rad_to_deg(calculate_roll_rad(q)) }
 #[inline]
-pub fn pitch_deg(q: Quat) -> Deg { rad_to_deg(pitch_rad(q)) }
+pub fn calculate_pitch_deg(q: Quat) -> Deg { rad_to_deg(calculate_pitch_rad(q)) }
 #[inline]
-pub fn yaw_deg(q: Quat) -> Deg { rad_to_deg(yaw_rad(q)) }
+pub fn calculate_yaw_deg(q: Quat) -> Deg { rad_to_deg(calculate_yaw_rad(q)) }
 
 #[inline]
-pub fn roll_deg_to_quat(deg: Deg) -> Quat {
-    axis_angle_to_quat(Vec3::new(0.0, 1.0, 0.0), deg_to_rad(deg))
+pub fn yaw_rad_to_quat(roll: Rad) -> Quat {
+    axis_angle_rad_to_quat(Vec3 {x: 1.0, y: 0.0, z: 0.0}, roll)
+}
+
+#[inline]
+pub fn pitch_rad_to_quat(yaw: Rad) -> Quat {
+    axis_angle_rad_to_quat(Vec3 {x: 0.0, y: 0.0, z: 1.0}, yaw)
+}
+
+#[inline]
+pub fn roll_rad_to_quat(pitch: Rad) -> Quat {
+    axis_angle_rad_to_quat(Vec3 {x: 0.0, y: 1.0, z: 0.0}, pitch)
+}
+
+#[inline]
+pub fn yaw_deg_to_quat(yaw: Deg) -> Quat {
+    yaw_rad_to_quat(deg_to_rad(yaw))
+}
+
+#[inline]
+pub fn pitch_deg_to_quat(pitch: Deg) -> Quat {
+    pitch_rad_to_quat(deg_to_rad(pitch))
+}
+
+#[inline]
+pub fn roll_deg_to_quat(roll: Deg) -> Quat {
+    roll_rad_to_quat(deg_to_rad(roll))
+}
+
+pub const fn duration_to_seconds(dt: Duration) -> f64 {
+    dt.as_nanos() as f64 * 1e-9 // convert to seconds
 }
 
 #[cfg(test)]
@@ -496,7 +527,7 @@ mod tests {
     #[test]
     fn axis_angle_90deg_z() {
         // 90° about +Z = [cos45, 0, 0, sin45]
-        let q = axis_angle_to_quat(Vec3::new(0.0, 0.0, 1.0), core::f64::consts::FRAC_PI_2);
+        let q = axis_angle_rad_to_quat(Vec3::new(0.0, 0.0, 1.0), core::f64::consts::FRAC_PI_2);
         approx_eq(q.w, libm::cos(core::f64::consts::FRAC_PI_4));
         approx_eq(q.z, libm::sin(core::f64::consts::FRAC_PI_4));
     }

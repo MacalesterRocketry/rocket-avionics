@@ -43,7 +43,7 @@ use smart_leds::{RGB8, RGBA};
 use static_cell::StaticCell;
 use crate::orientation::gps::gps_loop;
 use crate::output::sdcard::sd_logging_loop;
-use crate::output::servo::servos_loop;
+use crate::output::fins::fins_loop;
 
 mod config;
 mod errors;
@@ -80,7 +80,7 @@ bitflags! {
     pub struct Subsystem: u8 {
         const BASE_SYSTEM = 1 << 0; // core 0
         const SENSORS     = 1 << 1;
-        const SERVOS      = 1 << 2;
+        const CONTROL     = 1 << 2;
 
         const INDICATORS  = 1 << 5; // core 1
         const SD_CARD     = 1 << 6;
@@ -190,7 +190,7 @@ async fn core0_main(
 
     embassy_futures::join::join(
         system_loop(i2c_config, peripheral_config),
-        servos_loop(servos_config),
+        fins_loop(servos_config),
     ).await;
 }
 

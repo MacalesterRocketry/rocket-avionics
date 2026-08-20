@@ -3,31 +3,27 @@
 //! Each RP2350 PWM slice drives two channels, so the four fin servos occupy
 //! two slices. Which channel a servo lands on is fixed by its GPIO number, and
 //! that mapping is declared once in `config::board`. By the time a `Servos`
-//! reaches this module the slices are already split into independent [`Fin`]s,
-//! so nothing here knows or cares about slices or A/B channels — a fin is a
+//! reaches this module the slices are already split into independent [`ServoOutput`]s,
+//! so nothing here knows or cares about slices or A/B channels — a servo is a
 //! named field, and writing one never disturbs its slice-mate.
 //!
-//! Each [`Fin`] owns its trim and applies it on every write, so there is no
+//! Each [`ServoOutput`] owns its trim and applies it on every write, so there is no
 //! path that commands a servo without its calibration.
 //!
 //! Setting an angle is a plain register write, so none of this is `async`.
 
-use defmt::{error, info, Debug2Format};
 use embassy_rp::pwm;
 use embassy_rp::pwm::PwmOutput;
-use embassy_time::{Duration, Ticker};
 use embedded_hal::pwm::SetDutyCycle;
-
-use crate::config::board::{ServoConfig, Servos, SYS_CLK_HZ};
+use crate::config::board::{SYS_CLK_HZ, ServoConfig, Servos};
 use crate::config::{
     SERVO_DEGREE_RANGE, SERVO_MAX_ANGLE, SERVO_MICROS_MAX, SERVO_MICROS_MIN, SERVO_MIN_ANGLE,
     SERVO_TRIM,
 };
-use crate::{mark_init_failed, Subsystem, mark_init_complete};
-use crate::math::{clamp, Deg};
+use crate::math::{Deg, clamp};
 
 /// Standard hobby-servo frame rate.
-const SERVO_PWM_HZ: u32 = 50;
+pub(crate) const SERVO_PWM_HZ: u32 = 50;
 /// One PWM frame in microseconds — the denominator every pulse width is
 /// expressed against.
 const SERVO_PERIOD_MICROS: u16 = (1_000_000 / SERVO_PWM_HZ) as u16;
@@ -54,15 +50,15 @@ const _: () = assert!(
     "servo PWM counter top overflows u16; raise PWM_DIV_INT"
 );
 
-/// Pulse width per degree of fin deflection: 10 µs/deg over a 100° sweep.
+/// Pulse width per degree of servo deflection: for example, 10 µs/deg over a 100° sweep.
 const MICROS_PER_DEG: f64 = (SERVO_MICROS_MAX - SERVO_MICROS_MIN) as f64 / SERVO_DEGREE_RANGE;
 /// Pulse width at zero deflection and zero trim.
 const MICROS_CENTER: f64 = (SERVO_MICROS_MIN + SERVO_MICROS_MAX) as f64 / 2.0;
 
-/// Convert a deflection angle (deg, signed, 0 = in line with the fin) plus that
-/// fin's `trim` into a pulse width in microseconds.
+/// Convert a deflection angle (deg, signed, 0 = neutral) plus that servo's `trim` into
+/// a pulse width in microseconds.
 ///
-/// Limited both to the fin's mechanical limits (the bounds for the servo's travel)
+/// Limited both to the servo's mechanical limits (the bounds for the servo's travel)
 /// and the servo's electronic endpoints, so trim removes a bit of range from one end.
 pub const fn angle_to_micros(angle_deg_from_neutral: Deg, trim: Deg) -> u16 {
     let commanded = clamp(angle_deg_from_neutral, SERVO_MIN_ANGLE, SERVO_MAX_ANGLE);
@@ -78,17 +74,17 @@ fn servo_pwm_config() -> pwm::Config {
     config
 }
 
-/// One fin's servo, carrying the trim that calibrates it.
+/// One servo, carrying the trim that calibrates it.
 ///
 /// The `PwmOutput` is private on purpose: every write goes through
-/// [`set_angle`](Fin::set_angle), so there is no way to command a fin and
+/// [`set_angle`](ServoOutput::set_angle), so there is no way to command a servo and
 /// forget its trim.
-pub struct Fin {
+pub struct ServoOutput {
     output: PwmOutput<'static>,
     trim: Deg,
 }
 
-impl Fin {
+impl ServoOutput {
     /// Built by the generated `ServoConfig::into_servos`. Not useful elsewhere:
     /// a `PwmOutput` can only be obtained by claiming the servo pins, which
     /// happens exactly once.
@@ -96,12 +92,7 @@ impl Fin {
         Self { output, trim }
     }
 
-    /// This fin's mechanical zero offset in degrees
-    pub const fn trim(&self) -> Deg {
-        self.trim
-    }
-
-    /// Deflect this fin. 0° is in line with the fin; positive and negative
+    /// Deflect this servo. 0° is the neutral position; positive and negative
     /// angles rotate it opposite ways. Trim is always applied.
     pub fn set_angle(&mut self, angle_deg_from_neutral: Deg) -> Result<(), pwm::PwmError> {
         self.output.set_duty_cycle_fraction(
@@ -111,34 +102,13 @@ impl Fin {
     }
 }
 
-/// Claim the servo pins and bring every fin to neutral.
+/// Claim the servo pins and bring every servo to neutral.
 pub fn init_servos(servo_config: ServoConfig) -> Result<Servos, pwm::PwmError> {
     let mut servos = servo_config.into_servos(&servo_pwm_config(), SERVO_TRIM);
-    for fin in servos.iter_mut() {
-        fin.set_angle(0.0)?;
+    for servo in servos.iter_mut() {
+        servo.set_angle(0.0)?;
     }
     Ok(servos)
-}
-
-pub async fn servos_loop(servo_config: ServoConfig) {
-    info!("initializing servos");
-    let servos = init_servos(servo_config);
-    if servos.is_err() {
-        error!("Error initializing servos: {:?}", Debug2Format(&servos.err().unwrap()));
-        mark_init_failed(Subsystem::SERVOS);
-    } else {
-        mark_init_complete(Subsystem::SERVOS);
-    }
-    info!("servos initialized");
-
-    let mut ticker = Ticker::every(Duration::from_hz(20));
-    loop {
-        ticker.next().await;
-        // TODO: Figure out what tick rate I actually want and how to communicate it. Maybe just have an atomic or Watch for the servo angles?
-        //  Or maybe move the final angular acceleration -> servo angle calculation over to this file and have a Watch for desired pitch, roll, yaw accel?
-        //  Or move PID here?
-        //  This definitely doesn't need to be faster than 50Hz, since that's the PWM speed.
-    }
 }
 
 // TODO: figure out how testing needs to work
@@ -191,12 +161,21 @@ mod tests {
         assert_eq!(angle_to_micros(47.0, -3.0), SERVO_MICROS_MIN);
         assert_eq!(angle_to_micros(SERVO_MAX_ANGLE, -3.0), SERVO_MICROS_MIN);
         // ...while the opposite end keeps its full travel.
-        assert_eq!(angle_to_micros(SERVO_MIN_ANGLE, -3.0), SERVO_MICROS_MAX - 30);
+        assert_eq!(
+            angle_to_micros(SERVO_MIN_ANGLE, -3.0),
+            SERVO_MICROS_MAX - 30
+        );
     }
 
     #[test]
     fn commands_beyond_mechanical_authority_clamp() {
-        assert_eq!(angle_to_micros(180.0, 0.0), angle_to_micros(SERVO_MAX_ANGLE, 0.0));
-        assert_eq!(angle_to_micros(-180.0, 0.0), angle_to_micros(SERVO_MIN_ANGLE, 0.0));
+        assert_eq!(
+            angle_to_micros(180.0, 0.0),
+            angle_to_micros(SERVO_MAX_ANGLE, 0.0)
+        );
+        assert_eq!(
+            angle_to_micros(-180.0, 0.0),
+            angle_to_micros(SERVO_MIN_ANGLE, 0.0)
+        );
     }
 }

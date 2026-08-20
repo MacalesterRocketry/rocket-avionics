@@ -1,18 +1,10 @@
-//! Madgwick-style attitude/heading reference system, ported from `ahrs.cpp`.
-//!
-//! This module is split into a **pure math layer** (gradient computation, quat
-//! propagation) that's host-testable, and a **runtime state struct** that the
-//! sensor task reads from / writes to via an Embassy mutex. Keeping the math
-//! separate from the I/O lets us regression-test against existing logXX.bin
-//! files before flying.
-//!
-//! Status: SKELETON. Function signatures match the C++ API so the rest of the
-//! firmware can be ported against this surface, but bodies are stubs.
+// TODO: These are all pure functions, so this is all unit testable without even needing to run on the board.
+//  Figure out a way to do that.
 
 use embassy_time::{Duration, Instant};
 use libm::{asin, atan2, cos, sin, sqrt};
 use crate::config::{AHRS_ACC_BETA, AHRS_MAG_BETA, G};
-use crate::math::{deg_to_rad, rad_to_deg, Deg, Grad4, Quat, Rad, Vec3};
+use crate::math::{deg_to_rad, rad_to_deg, Deg, Grad4, Quat, Rad, Vec3, axis_angle_rad_to_quat, duration_to_seconds};
 
 /// Mutable AHRS runtime state. Lives behind an Embassy mutex; the sensor task
 /// owns the write side and the control loop reads via getter functions.
@@ -116,15 +108,15 @@ impl AhrsState {
         // #endif
     }
 
-    pub fn launch(&mut self) {
+    pub const fn launch(&mut self) {
         self.in_flight = true;
     }
 
-    pub fn landing(&mut self) {
+    pub const fn landing(&mut self) {
         self.in_flight = false;
     }
 
-    pub fn zero_pos_vel(&mut self) {
+    pub const fn zero_pos_vel(&mut self) {
         self.position_earth = Vec3::ZERO;
         self.velocity_earth = Vec3::ZERO;
     }
@@ -134,30 +126,14 @@ impl AhrsState {
         self.last_update = Instant::now();
     }
 
-    pub fn get_orientation_earth(&self) -> Quat { self.q }
-    pub fn get_acceleration_earth(&self) -> Vec3 { self.acceleration_earth }
-    pub fn get_velocity_earth(&self) -> Vec3 { self.velocity_earth }
-    pub fn get_position_earth(&self) -> Vec3 { self.position_earth }
-    pub fn get_angular_velocity_body(&self) -> Vec3 { self.angular_velocity_body }
-}
-
-pub fn rotate_body_to_earth(q: Quat, v_b: Vec3) -> Vec3 {
-    // p = q ⊗ [0,v_b] ⊗ q*
-    let res = q * v_b.to_quat(0.0) * q.conjugate();
-    Vec3{ x: res.x, y: res.y, z: res.z } // last 3 are vector part
-}
-
-pub fn rotate_earth_to_body(q: Quat, v_e: Vec3) -> Vec3 {
-    // p = q* ⊗ [0,v_e] ⊗ q
-    let res = q.conjugate() * v_e.to_quat(0.0) * q;
-    Vec3{ x: res.x, y: res.y, z: res.z } // last 3 are vector part
-}
-
-// small helper: axis-angle -> quaternion exact
-pub fn axis_angle_rad_to_quat(axis: Vec3, angle: f64) -> Quat {
-    let half = angle * 0.5;
-    let s = sin(half);
-    Quat{ w: cos(half), x: axis.x * s, y: axis.y * s, z: axis.z * s }
+    // TODO: Right now, other modules can access the struct directly. Either remove these
+    //  or remove public access to the struct. (and probably figure out some way of making
+    //  it all thread-safe)
+    pub const fn get_orientation_earth(&self) -> Quat { self.q }
+    pub const fn get_acceleration_earth(&self) -> Vec3 { self.acceleration_earth }
+    pub const fn get_velocity_earth(&self) -> Vec3 { self.velocity_earth }
+    pub const fn get_position_earth(&self) -> Vec3 { self.position_earth }
+    pub const fn get_angular_velocity_body(&self) -> Vec3 { self.angular_velocity_body }
 }
 
 // build delta quaternion(propagation) from angular rate omega (rad/s) and dt
@@ -287,58 +263,14 @@ pub fn compute_bias_mean(samples: &[Vec3]) -> Vec3 {
     s / samples.len() as f64
 }
 
-// Main Loop AHRS function Using the above utilities
-
-pub fn calculate_pitch_rad(q: Quat) -> Rad {
-    atan2(2.0 * (q.w * q.x + q.y * q.z),
-          1.0 - 2.0 * (q.x * q.x + q.y * q.y))
+pub fn rotate_body_to_earth(q: Quat, v_b: Vec3) -> Vec3 {
+    // p = q ⊗ [0,v_b] ⊗ q*
+    let res = q * v_b.to_quat(0.0) * q.conjugate();
+    Vec3{ x: res.x, y: res.y, z: res.z } // last 3 are vector part
 }
 
-pub fn calculate_yaw_rad(q: Quat) -> Rad {
-    asin(2.0 * (q.w * q.y - q.z * q.x))
-}
-
-pub fn calculate_roll_rad(q: Quat) -> Rad {
-    -atan2(2.0 * (q.w * q.z + q.x * q.y),
-           1.0 - 2.0 * (q.y * q.y + q.z * q.z))
-}
-
-pub fn calculate_roll_deg(q: Quat) -> Deg {
-    rad_to_deg(calculate_roll_rad(q))
-}
-
-pub fn calculate_pitch_deg(q: Quat) -> Deg {
-    rad_to_deg(calculate_pitch_rad(q))
-}
-
-pub fn calculate_yaw_deg(q: Quat) -> Deg {
-    rad_to_deg(calculate_yaw_rad(q))
-}
-
-pub fn yaw_rad_to_quat(roll: Rad) -> Quat {
-    axis_angle_rad_to_quat(Vec3 {x: 1.0, y: 0.0, z: 0.0}, roll)
-}
-
-pub fn pitch_rad_to_quat(yaw: Rad) -> Quat {
-    axis_angle_rad_to_quat(Vec3 {x: 0.0, y: 0.0, z: 1.0}, yaw)
-}
-
-pub fn roll_rad_to_quat(pitch: Rad) -> Quat {
-    axis_angle_rad_to_quat(Vec3 {x: 0.0, y: 1.0, z: 0.0}, pitch)
-}
-
-pub fn yaw_deg_to_quat(yaw: Deg) -> Quat {
-    yaw_rad_to_quat(deg_to_rad(yaw))
-}
-
-pub fn pitch_deg_to_quat(pitch: Deg) -> Quat {
-    pitch_rad_to_quat(deg_to_rad(pitch))
-}
-
-pub fn roll_deg_to_quat(roll: Deg) -> Quat {
-    roll_rad_to_quat(deg_to_rad(roll))
-}
-
-fn duration_to_seconds(dt: Duration) -> f64 {
-    dt.as_nanos() as f64 * 1e-9 // convert to seconds
+pub fn rotate_earth_to_body(q: Quat, v_e: Vec3) -> Vec3 {
+    // p = q* ⊗ [0,v_e] ⊗ q
+    let res = q.conjugate() * v_e.to_quat(0.0) * q;
+    Vec3{ x: res.x, y: res.y, z: res.z } // last 3 are vector part
 }
