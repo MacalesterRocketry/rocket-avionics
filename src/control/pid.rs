@@ -1,23 +1,15 @@
-//! Roll PID controller. Skeleton.
+//! Roll PID controller
 //!
 //! Ported from `roll-controller.cpp`. The pure-math pieces (effectiveness
 //! curve, PID step from quat error to fin deflection) live here as plain
 //! functions so they can be unit-tested on host against the existing
 //! Python simulation that produced the Kp/Ki/Kd values in `config.rs`.
 
-use crate::config::{ROLL_PID_KD, ROLL_PID_KI, ROLL_PID_KP, TORQUE_PER_DEG_50MS};
-use crate::math::{Deg, Quat, Vec3, calculate_roll_deg, duration_to_seconds, roll_deg_to_quat};
-use crate::orientation::ahrs::AhrsState;
-use crate::output::fins;
+use crate::config::{ROLL_PID_KD, ROLL_PID_KI, ROLL_PID_KP};
+use crate::navigation::ahrs::AhrsState;
+use crate::utils::math::{Deg, Quat, calculate_roll_deg, duration_to_seconds, roll_deg_to_quat};
 use embassy_time::{Duration, Instant};
 use num_traits::abs;
-
-/// Effectiveness is the slope of the deflection vs torque curve at zero deflection, which is what we want for the linear approximation. We can adjust it later if we want to get fancy and account for nonlinearity at higher deflections.
-/// Using deflection in degrees, so effectiveness is in Nm/deg
-pub fn effectiveness(velocity_earth: Vec3) -> f64 {
-    let v = velocity_earth.mag();
-    TORQUE_PER_DEG_50MS * (v * v) / (50.0 * 50.0)
-}
 
 /// Stateful PID step. Caller must persist `integral` across calls (or pass an
 /// owned `RollPid` struct — preferred over the C++ `static double integral`
@@ -73,7 +65,7 @@ impl RollPid {
         let now = Instant::now();
         if abs(target_angle - current_angle) > 1.0 {
             let dt = now - self.last_time;
-            let fin_deflection_angle = self.calculate_deflection_pid(&qtarget, &ahrs, dt);
+            let fin_deflection_angle = self.calculate_desired_angular_acceleration(&qtarget, &ahrs, dt);
             // TODO: figure out logging to SD and defmt
             // logRollControl(target_angle, current_angle, fin_deflection_angle);
             // #if DEBUG and DEBUG_PRINT_ROLL_CONTROL
@@ -96,10 +88,7 @@ impl RollPid {
         chosen_deflection
     }
 
-    /// Calculate the required fin deflection to achieve a desired roll angle, using a PID controller.
-    /// This is a simplified version that assumes a linear relationship between fin deflection and torque.
-    /// In practice, this relationship is more complex and may require a more sophisticated model.
-    fn calculate_deflection_pid(&mut self, qtarget: &Quat, ahrs: &AhrsState, dt: Duration) -> Deg {
+    fn calculate_desired_angular_acceleration(&mut self, qtarget: &Quat, ahrs: &AhrsState, dt: Duration) -> Deg {
         let qcurrent = ahrs.get_orientation_earth();
 
         // ============================================
@@ -129,7 +118,6 @@ impl RollPid {
 
         // Total desired angular acceleration
         let ang_accel_desired: f64 = ang_accel_p + ang_accel_i + ang_accel_d;
-
-        fins::angular_accel_to_fin_deflection_angle(ahrs, ang_accel_desired)
+        ang_accel_desired
     }
 }

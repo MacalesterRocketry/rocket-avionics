@@ -2,12 +2,12 @@
 //!
 //! Scale factor: 49 mg/LSB on ADXL375 (per datasheet table 1).
 
-use adxl3xx::{AdxlBusI2c, Adxl375 as Adxl3xxDriver};
+use adxl3xx::{Adxl375 as Adxl3xxDriver, AdxlBusI2c};
 use embedded_hal::i2c::I2c as I2cBus;
 
 use crate::config::{HIGHG_BIAS_X, HIGHG_BIAS_Y, HIGHG_BIAS_Z};
-use crate::math::Vec3;
-use crate::types::AdxlReading;
+use crate::sensors::AdxlReading;
+use crate::utils::math::Vec3;
 
 #[derive(Debug)]
 pub enum Error {

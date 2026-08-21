@@ -7,32 +7,31 @@
 
 #![allow(dead_code, unused_variables)]
 
-use defmt::{error, info, Debug2Format};
+use crate::communication::indication::{BeepCycle, BeepSequence, LedColor, StateIndicator};
+use crate::config::HAS_DROGUE_CHUTE;
+use crate::config::board::{I2cConfig, IndicatorsConfig, NUM_LEDS, Neopixel, PeripheralConfig};
+use crate::control::pid::RollPid;
+use crate::navigation::ahrs;
+use crate::navigation::ahrs::AhrsState;
+use crate::navigation::gps::{GPS_STATE, GpsState};
+use crate::sensors::SensorReadings;
+use crate::sensors::Sensors;
+use crate::utils::errors::handle_unrecoverable_error;
+use crate::utils::math::Deg;
+use crate::{FLIGHT_STATE, Irqs, Subsystem, is_critical_failure, is_init_all_complete, is_init_critical_complete, mark_init_complete, mark_init_failed, sensors};
+use defmt::{Debug2Format, error, info};
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::PIO0;
-use embassy_rp::{i2c, pio};
 use embassy_rp::pio::Pio;
 use embassy_rp::pio_programs::ws2812;
 use embassy_rp::pio_programs::ws2812::{Grb, PioWs2812, PioWs2812Program, RgbColorOrder};
+use embassy_rp::{i2c, pio};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Receiver;
 use embassy_time::{Duration, Instant, Ticker, Timer};
-use smart_leds::hsv::{hsv2rgb, Hsv};
 use smart_leds::RGB8;
+use smart_leds::hsv::{Hsv, hsv2rgb};
 use uom::si::reciprocal_length::reciprocal_centimeter;
-use crate::config::HAS_DROGUE_CHUTE;
-use crate::math::Deg;
-use crate::{is_critical_failure, is_init_all_complete, is_init_critical_complete, mark_init_complete, mark_init_failed, sensors, state, Irqs, Subsystem, FLIGHT_STATE};
-use crate::config::board::{I2cConfig, IndicatorsConfig, Neopixel, PeripheralConfig, NUM_LEDS};
-use crate::errors::handle_unrecoverable_error;
-use crate::sensors::Sensors;
-use crate::types::SensorReadings;
-use crate::orientation::ahrs;
-use crate::orientation::ahrs::AhrsState;
-use crate::orientation::gps::{GpsState, GPS_STATE};
-use crate::output::indication::{BeepCycle, BeepSequence, LedColor, StateIndicator};
-use crate::output::roll_controller;
-use crate::output::roll_controller::RollPid;
 
 pub struct SystemState<'a, I2C: embedded_hal::i2c::I2c> {
     pub state: Receiver<'a, CriticalSectionRawMutex, FlightState, 2>,
@@ -98,7 +97,7 @@ impl FlightState {
             FlightState::PreLaunch(GroundSubState::ReadyToLaunch(gps_state)) => match gps_state {
                 ReadyToLaunchSubState::WaitingForGPS => StateIndicator {
                     led: LedColor::Green,
-                    buzzer: standard_beep_cycle(1, 8), // TODO: should probably eventually rethink this, but fine for now
+                    buzzer: standard_beep_cycle(1, 8), // TODO: should probably eventually rethink this (e.g. 2 beeps if GPS lock), but fine for now
                 },
                 ReadyToLaunchSubState::GPSLock => StateIndicator {
                     led: LedColor::Green,
@@ -199,7 +198,8 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
                     self.ignition_time = Some(now);
                 }
                 let time_since_ignition = now - self.ignition_time.unwrap_or(now);
-                self.roll_pid.step(roll_program(time_since_ignition), self.ahrs, tick_time);
+                let desired_angular_acceleration = self.roll_pid.step(roll_program(time_since_ignition), self.ahrs, tick_time);
+                // TODO: send this somehow to fins.rs
                 match sub {
                     AscentSubState::Burn => {
                         // TODO: test; if acceleration is negative in z and it's already off the rail (velocity is somewhat high), switch to Coast

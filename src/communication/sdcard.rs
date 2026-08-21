@@ -13,11 +13,11 @@
 
 #![allow(dead_code, unused_variables)]
 
+use crate::communication::log_packets::PacketType;
+use crate::config::board::SdConfig;
+use crate::{FLIGHT_STATE, Subsystem, mark_init_complete, mark_init_failed};
 use defmt::error;
 use embassy_time::{Duration, Ticker};
-use crate::config::board::SdConfig;
-use crate::{mark_init_failed, FLIGHT_STATE, Subsystem, mark_init_complete};
-use crate::log_packets::PacketType;
 
 /// Enum of every payload variant that can be pushed onto the SD log channel.
 /// Defined as a single sum type so the channel has a fixed element size
@@ -46,7 +46,7 @@ pub async fn sd_logging_loop(sd_config: SdConfig) {
 
     mark_init_complete(Subsystem::SD_CARD);
     let mut ticker: Ticker = Ticker::every(Duration::from_hz(20));
-    loop {
+    loop { // TODO: Use a Channel to receive packets then serialize and writeeee
         ticker.next().await;
         if gps_receiver.is_some() {
             match gps_receiver.as_mut() {

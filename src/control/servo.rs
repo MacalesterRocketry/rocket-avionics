@@ -12,15 +12,15 @@
 //!
 //! Setting an angle is a plain register write, so none of this is `async`.
 
-use embassy_rp::pwm;
-use embassy_rp::pwm::PwmOutput;
-use embedded_hal::pwm::SetDutyCycle;
 use crate::config::board::{SYS_CLK_HZ, ServoConfig, Servos};
 use crate::config::{
     SERVO_DEGREE_RANGE, SERVO_MAX_ANGLE, SERVO_MICROS_MAX, SERVO_MICROS_MIN, SERVO_MIN_ANGLE,
     SERVO_TRIM,
 };
-use crate::math::{Deg, clamp};
+use crate::utils::math::{Deg, clamp};
+use embassy_rp::pwm;
+use embassy_rp::pwm::PwmOutput;
+use embedded_hal::pwm::SetDutyCycle;
 
 /// Standard hobby-servo frame rate.
 pub(crate) const SERVO_PWM_HZ: u32 = 50;

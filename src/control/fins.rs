@@ -1,25 +1,31 @@
-use defmt::{error, info, Debug2Format};
-use embassy_rp::pwm;
-use embassy_time::{Duration, Ticker};
 use crate::config::board::{ServoConfig, Servos};
-use crate::config::MOMENT_OF_INERTIA;
-use crate::{mark_init_failed, Subsystem, mark_init_complete};
-use crate::math::Deg;
-use crate::orientation::ahrs::AhrsState;
-use crate::output::roll_controller;
-use crate::output::servo::init_servos;
+use crate::config::{MOMENT_OF_INERTIA, TORQUE_PER_DEG_50MS};
+use crate::control::servo;
+use crate::control::servo::init_servos;
+use crate::navigation::ahrs::AhrsState;
+use crate::utils::math::{Deg, Vec3};
+use crate::{Subsystem, mark_init_complete, mark_init_failed};
+use defmt::{Debug2Format, error, info};
+use embassy_time::{Duration, Ticker};
+
+/// Effectiveness is the slope of the deflection vs torque curve at zero deflection, which is what we want for the linear approximation. We can adjust it later if we want to get fancy and account for nonlinearity at higher deflections.
+/// Using deflection in degrees, so effectiveness is in Nm/deg
+pub fn effectiveness(velocity_earth: Vec3) -> f64 {
+    let v = velocity_earth.mag();
+    TORQUE_PER_DEG_50MS * (v * v) / (50.0 * 50.0)
+}
 
 // TODO: Here uom would probably be great.
-pub fn angular_accel_to_fin_deflection_angle(ahrs: &AhrsState, ang_accel_desired: f64) -> Deg {
+pub fn angular_accel_to_fin_deflection_angle(velocity_earth: Vec3, ang_accel_desired: f64) -> Deg {
     let torque_desired: f64 = ang_accel_desired * MOMENT_OF_INERTIA; // τ = I * α
 
     // adjusted: Look up effectiveness AT ZERO deflection
-    let effectiveness_zero: f64 = roll_controller::effectiveness(ahrs.get_velocity_earth());
+    let effectiveness_zero: f64 = effectiveness(velocity_earth);
 
     // Compute fin deflection using linear approximation
     if effectiveness_zero <= 1e-9 {
         // If effectiveness is too low, we can't control, so return zero deflection
-        return 0.0
+        return 0.0;
     }
     let fin_deflection_angle: f64 = torque_desired / effectiveness_zero;
     fin_deflection_angle
@@ -41,9 +47,11 @@ pub async fn fins_loop(servo_config: ServoConfig) {
     };
     info!("servos initialized");
 
-    let mut ticker = Ticker::every(Duration::from_hz(crate::output::servo::SERVO_PWM_HZ as u64));
+    let mut ticker = Ticker::every(Duration::from_hz(servo::SERVO_PWM_HZ as u64));
     loop {
         ticker.next().await;
+
+        // angular_accel_to_fin_deflection_angle(ahrs, ang_accel_desired);
         // if let Some(sp) = setpoints.try_get() {
         //     // TODO: write to each fin
         // }

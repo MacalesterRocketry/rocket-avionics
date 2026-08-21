@@ -1,5 +1,5 @@
+use crate::communication::indication::{LedColor, drive_buzzer, set_neopixel_color};
 use crate::config::board::{IndicatorsConfig, NUM_LEDS, Neopixel};
-use crate::output::indication::{LedColor, drive_buzzer, set_neopixel_color};
 use crate::state::FlightState;
 use crate::{FLIGHT_STATE, Irqs, Subsystem, mark_init_complete, mark_init_failed};
 use core::panic::PanicInfo;

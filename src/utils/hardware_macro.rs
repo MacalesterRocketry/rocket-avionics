@@ -11,7 +11,7 @@
         // Servos get their own section because a PWM slice drives exactly two
         // of them, and which one is channel A vs B is fixed by the GPIO number
         // (even = A, odd = B). Naming the `a:`/`b:` slots here is the only
-        // place that fact appears — `output::servo` never sees a slice or a
+        // place that fact appears — `control::servo` never sees a slice or a
         // channel. Putting a channel-B pin in an `a:` slot is a compile error,
         // because `Pwm::new_output_ab` demands `ChannelAPin`/`ChannelBPin`.
         //
@@ -50,8 +50,8 @@
         #[derive(Debug, Clone, Copy)]
         pub struct Trims {
             $(
-                pub $a_field: crate::math::Deg,
-                pub $b_field: crate::math::Deg,
+                pub $a_field: crate::utils::math::Deg,
+                pub $b_field: crate::utils::math::Deg,
             )*
         }
 
@@ -61,8 +61,8 @@
         //    both compare registers at once).
         pub struct $servo_outputs {
             $(
-                pub $a_field: crate::output::servo::ServoOutput,
-                pub $b_field: crate::output::servo::ServoOutput,
+                pub $a_field: crate::control::servo::ServoOutput,
+                pub $b_field: crate::control::servo::ServoOutput,
             )*
         }
 
@@ -92,8 +92,8 @@
                 )*
                 $servo_outputs {
                     $(
-                        $a_field: crate::output::servo::ServoOutput::new($a_field, trims.$a_field),
-                        $b_field: crate::output::servo::ServoOutput::new($b_field, trims.$b_field),
+                        $a_field: crate::control::servo::ServoOutput::new($a_field, trims.$a_field),
+                        $b_field: crate::control::servo::ServoOutput::new($b_field, trims.$b_field),
                     )*
                 }
             }
@@ -103,7 +103,7 @@
             /// Every fin, in declaration order. For sweeps and for commands
             /// that apply to all fins at once; individual fins are just named
             /// fields.
-            pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut crate::output::servo::ServoOutput> {
+            pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut crate::control::servo::ServoOutput> {
                 [ $( &mut self.$a_field, &mut self.$b_field, )* ].into_iter()
             }
         }

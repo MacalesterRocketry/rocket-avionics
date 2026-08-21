@@ -13,48 +13,45 @@
 
 extern crate uom;
 
+use crate::communication::sdcard::sd_logging_loop;
 use crate::config::G;
-use crate::config::board::{ServoConfig, NUM_LEDS};
 use crate::config::board::{
-    AvionicsHardware, I2cConfig, IndicatorsConfig, InterruptConfig, Neopixel, PeripheralConfig,
-    SdConfig, GpsConfig,
+    AvionicsHardware, GpsConfig, I2cConfig, IndicatorsConfig, InterruptConfig, Neopixel, PeripheralConfig,
+    SdConfig,
 };
-use crate::state::{system_loop, FlightState, SystemState};
+use crate::config::board::{NUM_LEDS, ServoConfig};
+use crate::control::fins::fins_loop;
+use crate::navigation::gps::gps_loop;
+use communication::indication::indicator_loop;
 use core::sync::atomic::{AtomicU8, Ordering};
 use defmt::*;
 use defmt_rtt as _;
 use embassy_executor::{Executor, SpawnError, SpawnToken, Spawner};
 use embassy_rp::gpio::{Input, Output};
-use embassy_rp::{i2c, uart};
-use embassy_rp::multicore::{spawn_core1, Stack};
+use embassy_rp::multicore::{Stack, spawn_core1};
 use embassy_rp::peripherals::{DMA_CH0, DMA_CH1, DMA_CH2, I2C0, PIO0, UART0};
 use embassy_rp::pio::Pio;
 use embassy_rp::pio_programs::ws2812::{Grb, PioWs2812, PioWs2812Program};
-use embassy_rp::{bind_interrupts, dma, pio, pio_programs, Peri, Peripherals};
+use embassy_rp::{Peri, Peripherals, bind_interrupts, dma, pio, pio_programs};
+use embassy_rp::{i2c, uart};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant, Ticker, Timer};
 use embedded_hal::digital::OutputPin;
 use embedded_hal_async::i2c::I2c;
-use output::indication::indicator_loop;
-use smart_leds::hsv::{hsv2rgb, Hsv};
+use smart_leds::hsv::{Hsv, hsv2rgb};
 use smart_leds::{RGB8, RGBA};
 use static_cell::StaticCell;
-use crate::orientation::gps::gps_loop;
-use crate::output::sdcard::sd_logging_loop;
-use crate::output::fins::fins_loop;
+use crate::state::{system_loop, FlightState};
 
 mod config;
-mod errors;
-mod log_packets;
-mod math;
-mod orientation;
-mod output;
+mod navigation;
+mod communication;
 mod sensors;
-mod state;
-mod types;
-mod hardware_macro;
+pub mod control;
+pub mod utils;
+pub mod state;
 
 // 8 KiB of stack for core 1. Lives in SCRATCH_X (see memory.x) so it doesn't
 // share cache lines with the AHRS data on core 0. If a panic-probe trace shows
@@ -210,5 +207,6 @@ async fn core1_main(
         indicator_loop(indicators_config),
         sd_logging_loop(sd_config),
         gps_loop(gps_config),
+        // TODO: Add supervisor task for eject button, battery monitoring, SD card full, etc.?
     ).await;
 }

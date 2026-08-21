@@ -13,7 +13,7 @@
 //! a few sample packets through `decoder.py`'s `struct.unpack` format strings
 //! to catch any drift.
 
-use crate::math::{Quat, Vec3};
+use crate::utils::math::{Quat, Vec3};
 
 pub const FILE_VERSION: u8 = 3;
 pub const LITTLE_ENDIAN: u8 = 0;

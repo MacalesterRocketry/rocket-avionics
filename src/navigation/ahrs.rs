@@ -1,11 +1,12 @@
 // TODO: These are all pure functions, so this is all unit testable without even needing to run on the board.
 //  Figure out a way to do that.
 
-use embassy_time::{Duration, Instant};
-use libm::{asin, atan2, cos, sin, sqrt};
 use crate::config::{AHRS_ACC_BETA, AHRS_MAG_BETA, G};
-use crate::math::{deg_to_rad, rad_to_deg, Deg, Grad4, Quat, Rad, Vec3, axis_angle_rad_to_quat, duration_to_seconds};
+use crate::utils::math::{Grad4, Quat, Vec3, axis_angle_rad_to_quat, duration_to_seconds};
+use embassy_time::{Duration, Instant};
+use libm::sqrt;
 
+// TODO: use mutex or maybe Watch
 /// Mutable AHRS runtime state. Lives behind an Embassy mutex; the sensor task
 /// owns the write side and the control loop reads via getter functions.
 #[derive(Debug, Clone, Copy)]
@@ -13,7 +14,7 @@ pub struct AhrsState {
     pub q: Quat,
     pub last_update: Instant,
     pub acceleration_earth: Vec3,
-    pub velocity_earth: Vec3,
+    pub velocity_earth: Vec3, // TODO: Might not be a bad idea to make earth-frame and body-frame separate types with into() between them
     pub position_earth: Vec3,
     pub angular_velocity_body: Vec3,
     in_flight: bool,

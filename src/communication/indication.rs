@@ -1,16 +1,16 @@
+use crate::config::board::{IndicatorsConfig, NUM_LEDS, Neopixel};
+use crate::state::FlightState;
+use crate::{FLIGHT_STATE, Irqs, Subsystem, mark_init_complete, mark_init_failed};
 use defmt::*;
 use defmt_rtt as _;
-use smart_leds::hsv::{hsv2rgb, Hsv};
-use embassy_time::{Duration, Instant, Ticker};
-use smart_leds::RGB8;
 use embassy_rp::gpio::Output;
-use embassy_sync::watch::Receiver;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_rp::pio::Pio;
 use embassy_rp::pio_programs::ws2812::{PioWs2812, PioWs2812Program};
-use crate::config::board::{IndicatorsConfig, Neopixel, NUM_LEDS};
-use crate::{mark_init_complete, mark_init_failed, Irqs, Subsystem, FLIGHT_STATE};
-use crate::state::FlightState;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::watch::Receiver;
+use embassy_time::{Duration, Instant, Ticker};
+use smart_leds::RGB8;
+use smart_leds::hsv::{Hsv, hsv2rgb};
 
 #[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
 pub enum LedColor {
