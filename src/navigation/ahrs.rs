@@ -2,7 +2,7 @@
 //  Figure out a way to do that.
 
 use crate::config::{AHRS_ACC_BETA, AHRS_MAG_BETA, G, GYRO_LPF_HZ};
-use crate::utils::math::{Grad4, Quat, Vec3, axis_angle_rad_to_quat, duration_to_seconds};
+use crate::utils::math::{axis_angle_rad_to_quat, duration_to_seconds, AngularVec3, Grad4, Quat, Vec3};
 use core::f64::consts::PI;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Watch;
@@ -22,10 +22,10 @@ pub struct AhrsState {
     pub acceleration_earth: Vec3,
     pub velocity_earth: Vec3, // TODO: Might not be a bad idea to make earth-frame and body-frame separate types with into() between them
     pub position_earth: Vec3,
-    pub angular_velocity_body: Vec3,
+    pub angular_velocity_body: AngularVec3,
     /// [`angular_velocity_body`](Self::angular_velocity_body) low-passed at
     /// [`GYRO_LPF_HZ`]. Use this for control; the raw field is for logging.
-    pub angular_velocity_filtered: Vec3,
+    pub angular_velocity_filtered: AngularVec3,
     in_flight: bool,
 }
 
@@ -37,15 +37,15 @@ impl Default for AhrsState {
             acceleration_earth: Vec3::ZERO,
             velocity_earth: Vec3::ZERO,
             position_earth: Vec3::ZERO,
-            angular_velocity_body: Vec3::ZERO,
-            angular_velocity_filtered: Vec3::ZERO,
+            angular_velocity_body: AngularVec3::ZERO,
+            angular_velocity_filtered: AngularVec3::ZERO,
             in_flight: false,
         }
     }
 }
 
 impl AhrsState {
-    pub fn update(&mut self, gyro: Vec3, accel: Vec3, mag: Vec3, now: Instant) {
+    pub fn update(&mut self, gyro: AngularVec3, accel: Vec3, mag: Vec3, now: Instant) {
         let dt = now - self.last_update;
         self.last_update = now;
 
@@ -78,7 +78,7 @@ impl AhrsState {
         // EARTH FRAME CONVERSIONS
         // Convert body-frame measurements to earth frame for control systems
         let _earth_accel = rotate_body_to_earth(q4, accel);
-        let _earth_gyro = rotate_body_to_earth(q4, gyro);
+        let _earth_gyro = AngularVec3::from(rotate_body_to_earth(q4, gyro.into()));
         let _earth_mag = rotate_body_to_earth(q4, mag);
 
         self.acceleration_earth = _earth_accel - Vec3 {x: 0.0, y: 0.0, z: G}; // Remove gravity from vertical acceleration when on the ground
@@ -152,18 +152,18 @@ impl AhrsState {
     pub const fn get_acceleration_earth(&self) -> Vec3 { self.acceleration_earth }
     pub const fn get_velocity_earth(&self) -> Vec3 { self.velocity_earth }
     pub const fn get_position_earth(&self) -> Vec3 { self.position_earth }
-    pub const fn get_angular_velocity_body(&self) -> Vec3 { self.angular_velocity_body }
+    pub const fn get_angular_velocity_body(&self) -> AngularVec3 { self.angular_velocity_body }
     /// Low-passed body rates. This is the one control should use — see [`GYRO_LPF_HZ`].
-    pub const fn get_angular_velocity_filtered(&self) -> Vec3 { self.angular_velocity_filtered }
+    pub const fn get_angular_velocity_filtered(&self) -> AngularVec3 { self.angular_velocity_filtered }
 }
 
 // build delta quaternion(propagation) from angular rate omega (rad/s) and dt
-pub fn delta_quat_from_gyro(omega: Vec3, dt: Duration) -> Quat {
+pub fn delta_quat_from_gyro(omega: AngularVec3, dt: Duration) -> Quat {
     let dt_s = duration_to_seconds(dt);
     let wmag = omega.norm();
     if wmag < 1e-12 {
         // tiny rotation -> small-angle approx: q ≈ [1, 0.5*ω*dt]
-        Quat { w: 1.0, x: 0.5 * omega.x * dt_s, y: 0.5 * omega.y * dt_s, z: 0.5 * omega.z * dt_s }
+        (omega * 0.5 * dt_s).to_quat(1.0)
     } else {
         let axis = omega / wmag;
         let theta = wmag * dt_s;

@@ -239,6 +239,37 @@ impl AngularVec3 {
     pub const fn new(pitch: f64, yaw: f64, roll: f64) -> Self {
         Self { pitch, yaw, roll }
     }
+
+    #[inline]
+    pub const fn dot(self, v: AngularVec3) -> f64 {
+        self.pitch * v.pitch + self.yaw * v.yaw + self.roll * v.roll
+    }
+
+    #[inline]
+    pub const fn cross(self, v: AngularVec3) -> AngularVec3 {
+        AngularVec3 {
+            pitch: self.yaw * v.roll - self.roll * v.yaw,
+            yaw: self.roll * v.pitch - self.pitch * v.roll,
+            roll: self.pitch * v.yaw - self.yaw * v.pitch,
+        }
+    }
+
+    /// L2 norm. Named `norm3` in the C++ source.
+    #[inline]
+    pub fn norm(self) -> f64 {
+        sqrt(self.dot(self))
+    }
+
+    #[inline]
+    pub fn mag(self) -> f64 {
+        self.norm()
+    }
+
+    /// Build a pure quaternion `[w, x, y, z]` from this vector.
+    #[inline]
+    pub const fn to_quat(self, w: f64) -> Quat {
+        Quat::new(w, self.pitch, self.yaw, self.roll)
+    }
 }
 
 impl From<Vec3> for AngularVec3 {
@@ -252,6 +283,68 @@ impl Into<Vec3> for AngularVec3 {
     #[inline]
     fn into(self) -> Vec3 {
         Vec3::new(self.pitch, self.yaw, self.roll)
+    }
+}
+
+// Scalar ops
+impl Mul<f64> for AngularVec3 {
+    type Output = AngularVec3;
+    #[inline]
+    fn mul(self, s: f64) -> AngularVec3 {
+        AngularVec3::new(self.pitch * s, self.yaw * s, self.roll * s)
+    }
+}
+impl MulAssign<f64> for AngularVec3 {
+    #[inline]
+    fn mul_assign(&mut self, s: f64) {
+        self.pitch *= s;
+        self.yaw *= s;
+        self.roll *= s;
+    }
+}
+impl Div<f64> for AngularVec3 {
+    type Output = AngularVec3;
+    #[inline]
+    fn div(self, s: f64) -> AngularVec3 {
+        AngularVec3::new(self.pitch / s, self.yaw / s, self.roll / s)
+    }
+}
+impl DivAssign<f64> for AngularVec3 {
+    #[inline]
+    fn div_assign(&mut self, s: f64) {
+        self.pitch /= s;
+        self.yaw /= s;
+        self.roll /= s;
+    }
+}
+impl Add for AngularVec3 {
+    type Output = AngularVec3;
+    #[inline]
+    fn add(self, v: AngularVec3) -> AngularVec3 {
+        AngularVec3::new(self.pitch + v.pitch, self.yaw + v.yaw, self.roll + v.roll)
+    }
+}
+impl AddAssign for AngularVec3 {
+    #[inline]
+    fn add_assign(&mut self, v: AngularVec3) {
+        self.pitch += v.pitch;
+        self.yaw += v.yaw;
+        self.roll += v.roll;
+    }
+}
+impl Sub for AngularVec3 {
+    type Output = AngularVec3;
+    #[inline]
+    fn sub(self, v: AngularVec3) -> AngularVec3 {
+        AngularVec3::new(self.pitch - v.pitch, self.yaw - v.yaw, self.roll - v.roll)
+    }
+}
+impl SubAssign for AngularVec3 {
+    #[inline]
+    fn sub_assign(&mut self, v: AngularVec3) {
+        self.pitch -= v.pitch;
+        self.yaw -= v.yaw;
+        self.roll -= v.roll;
     }
 }
 
@@ -437,18 +530,23 @@ impl From<Quat> for Grad4 {
 }
 
 // ───────────────────── axis-angle and Euler conversions ─────────────────────
+/// Create a quaternion out of a rotation around a given axis.
+/// For example, an angle of pi/2 radians around the roll axis creates a quaterion
+/// that has rolled from the origin by 90°.
 #[inline]
-pub fn axis_angle_rad_to_quat(axis: Vec3, angle: Rad) -> Quat {
+pub fn axis_angle_rad_to_quat(axis: AngularVec3, angle: Rad) -> Quat {
     let half = angle * 0.5;
     let s = sin(half);
-    Quat::new(cos(half), axis.x * s, axis.y * s, axis.z * s)
+    (axis * s).to_quat(cos(half))
 }
 
 // TODO: These are all based on the wrong-ish sensor orientation. We should fix this all and transform
 //  it in the sensor reads instead.
+// TODO: Oddly enough, they might have actually been right? Assuming roll is around the Z axis,
+//  this was all right, except that roll was negative.
 #[inline]
 pub fn calculate_roll_rad(q: Quat) -> Rad {
-    -atan2(2.0 * (q.w * q.z + q.x * q.y),
+    atan2(2.0 * (q.w * q.z + q.x * q.y),
            1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 }
 
@@ -471,28 +569,28 @@ pub fn calculate_pitch_deg(q: Quat) -> Deg { rad_to_deg(calculate_pitch_rad(q)) 
 pub fn calculate_yaw_deg(q: Quat) -> Deg { rad_to_deg(calculate_yaw_rad(q)) }
 
 #[inline]
-pub fn yaw_rad_to_quat(roll: Rad) -> Quat {
-    axis_angle_rad_to_quat(Vec3 {x: 1.0, y: 0.0, z: 0.0}, roll)
+pub fn pitch_rad_to_quat(yaw: Rad) -> Quat {
+    axis_angle_rad_to_quat(AngularVec3 {pitch: 1.0, yaw: 0.0, roll: 0.0}, yaw)
 }
 
 #[inline]
-pub fn pitch_rad_to_quat(yaw: Rad) -> Quat {
-    axis_angle_rad_to_quat(Vec3 {x: 0.0, y: 0.0, z: 1.0}, yaw)
+pub fn yaw_rad_to_quat(roll: Rad) -> Quat {
+    axis_angle_rad_to_quat(AngularVec3 {pitch: 0.0, yaw: 1.0, roll: 0.0}, roll)
 }
 
 #[inline]
 pub fn roll_rad_to_quat(pitch: Rad) -> Quat {
-    axis_angle_rad_to_quat(Vec3 {x: 0.0, y: 1.0, z: 0.0}, pitch)
-}
-
-#[inline]
-pub fn yaw_deg_to_quat(yaw: Deg) -> Quat {
-    yaw_rad_to_quat(deg_to_rad(yaw))
+    axis_angle_rad_to_quat(AngularVec3 {pitch: 0.0, yaw: 0.0, roll: 1.0}, pitch)
 }
 
 #[inline]
 pub fn pitch_deg_to_quat(pitch: Deg) -> Quat {
     pitch_rad_to_quat(deg_to_rad(pitch))
+}
+
+#[inline]
+pub fn yaw_deg_to_quat(yaw: Deg) -> Quat {
+    yaw_rad_to_quat(deg_to_rad(yaw))
 }
 
 #[inline]
@@ -557,7 +655,7 @@ mod tests {
     #[test]
     fn axis_angle_90deg_z() {
         // 90° about +Z = [cos45, 0, 0, sin45]
-        let q = axis_angle_rad_to_quat(Vec3::new(0.0, 0.0, 1.0), core::f64::consts::FRAC_PI_2);
+        let q = axis_angle_rad_to_quat(AngularVec3::new(0.0, 0.0, 1.0), core::f64::consts::FRAC_PI_2);
         approx_eq(q.w, libm::cos(core::f64::consts::FRAC_PI_4));
         approx_eq(q.z, libm::sin(core::f64::consts::FRAC_PI_4));
     }

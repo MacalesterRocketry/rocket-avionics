@@ -52,6 +52,8 @@ impl RollPid {
         let qcurrent: Quat = ahrs.get_orientation_earth();
         // Compute quaternion error
         let qerror: Quat = (qcurrent.conjugate() * qtarget).normalized();
+        // TODO: Also, is this in earth-frame or body frame? If we were also controlling pitch and yaw, that wouldn't matter, but we need to be sure the axis is right.
+        //  This is definitely earth frame, since it's based on sources that also control pitch and yaw. We need to transform it to body.
 
         AngularVec3 {
             pitch: 0.0,
@@ -64,24 +66,21 @@ impl RollPid {
     }
 
     fn roll_pid(&mut self, qerror: Quat, ahrs: &AhrsState, dt: Duration) -> f64 {
-        // TODO: Also, is this in earth-frame or body frame? If we were also controlling pitch and yaw, that wouldn't matter, but we need to be sure the axis is right.
-        //  This is definitely earth frame, since it's based on sources that also control pitch and yaw. We need to transform it to body.
-
         // Convert to angular error
-        let eroll_y: f64 = -2.0 * qerror.y; // Y-component = roll error
+        let roll_error: f64 = -2.0 * qerror.z; // Z-component = roll error
         // TODO: I've found two possible errors from the simulation. First, we need to confirm that y is the right component; if it's not, we'll have problems like what we got.
         //  Second, qtarget may have the wrong sign of target going in. Not a big deal, and it might not actually be true outside of sim, but it's something to consider.
 
         // PID terms
-        let ang_accel_p: f64 = ROLL_PID_KP * eroll_y;
+        let ang_accel_p: f64 = ROLL_PID_KP * roll_error;
         if dt >= DT_MIN && dt <= DT_MAX {
-            self.integral += eroll_y * duration_to_seconds(dt);
+            self.integral += roll_error * duration_to_seconds(dt);
         }
         let ang_accel_i: f64 = ROLL_PID_KI * self.integral;
         // Filtered rather than raw: at the 50 Hz actuation rate the raw gyro
         // would alias high-frequency noise into the control band, and no
         // downstream filter could undo it. See GYRO_LPF_HZ.
-        let ang_accel_d: f64 = -ROLL_PID_KD * ahrs.get_angular_velocity_filtered().y;
+        let ang_accel_d: f64 = -ROLL_PID_KD * ahrs.get_angular_velocity_filtered().roll;
         // TODO: The integral is unbounded, so sustained fin saturation winds it
         //  up and leaves the fins pegged after the error reverses. It wants a
         //  clamp, but the bound is a tuning decision — pick it against sim or
@@ -91,7 +90,7 @@ impl RollPid {
 
         // TODO: figure out logging to SD and defmt. This fires every control
         //  tick, so it wants to be off by default in flight.
-        defmt::info!("roll pid: err={}, accel={}", eroll_y, ang_accel_desired);
+        defmt::info!("roll pid: err={}, accel={}", roll_error, ang_accel_desired);
         ang_accel_desired
     }
 }

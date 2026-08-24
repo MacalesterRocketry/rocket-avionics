@@ -277,7 +277,6 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
 /// the commanded angle. This is the guidance half of the control problem, and it
 /// lives here because the mission timeline does.
 fn attitude_target(launch_orientation: Quat, target_roll: Deg) -> Quat {
-    // TODO: The old was x: sin(angle/2), but the new one has x: sin(angle). Should the Vec3 passed into axisAngleToQuat be {0.5, 0, 0}? Check this all with Tala.
     let qroll = roll_deg_to_quat(-target_roll); // Negative for body frame
     // TODO: This probably has different pitch and yaw than what we actually want.
     //  Replace them with the current ones from qcurrent? Or just ignore them

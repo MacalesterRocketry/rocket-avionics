@@ -22,3 +22,5 @@
 //! feature. If its API turns out to be too sync-flavored, fall back to a
 //! 200-line register-level driver — the LSM6DSOX register map is well-
 //! documented in ST's datasheet and we only need a handful of writes.
+//! TODO: Rotate the result to the correct orientation, since it sits in an orientation
+//!  where -y is what we want Z to be.

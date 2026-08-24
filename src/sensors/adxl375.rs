@@ -15,7 +15,7 @@ use adxl3xx::{Adxl375 as Adxl3xxDriver, AdxlBusI2c};
 use embedded_hal::i2c::I2c as I2cBus;
 
 use crate::config::{HIGHG_BIAS_X, HIGHG_BIAS_Y, HIGHG_BIAS_Z};
-use crate::sensors::AdxlReading;
+use crate::sensors::{transform_sensor_axes, AdxlReading};
 use crate::utils::math::Vec3;
 
 #[derive(Debug)]
@@ -52,11 +52,13 @@ impl<I2C: I2cBus> Adxl<I2C> {
     /// Read XYZ, bias-corrected to m/s².
     pub fn read(&mut self) -> Result<AdxlReading, Error> {
         let raw: Vec3 = self.driver.read_axis().map_err(|_| Error::Read)?.into();
+        // The sensor is mounted in a different orientation than we want, so we need to transform the axes.
+        let transformed = transform_sensor_axes(raw);
         Ok(AdxlReading {
             accel: Vec3::new(
-                raw.x - HIGHG_BIAS_X,
-                raw.y - HIGHG_BIAS_Y,
-                raw.z - HIGHG_BIAS_Z,
+                transformed.x - HIGHG_BIAS_X,
+                transformed.y - HIGHG_BIAS_Y,
+                transformed.z - HIGHG_BIAS_Z,
             ),
         })
     }

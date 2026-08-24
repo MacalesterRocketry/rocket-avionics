@@ -14,7 +14,7 @@ pub mod bmp390;
 pub mod lis3mdl;
 pub mod lsm6dsox;
 
-use crate::utils::math::Vec3;
+use crate::utils::math::{AngularVec3, Vec3};
 
 /// Owns every sensor driver instance sharing the I²C bus.
 /// TODO: add lsm/lis3/bmp fields once their drivers are wired in.
@@ -60,7 +60,7 @@ pub struct LsmReading {
     /// Body-frame linear acceleration (m/s²), bias-subtracted.
     pub accel: Vec3,
     /// Body-frame angular rate (rad/s), bias-subtracted.
-    pub gyro: Vec3,
+    pub gyro: AngularVec3,
     /// Die temperature (°C).
     pub temperature: f64,
 }
@@ -111,5 +111,13 @@ impl SensorReadings {
     /// a plain magnitude check).
     pub fn has_launched(&self) -> bool {
         self.adxl.accel.mag() >= crate::config::LAUNCH_ACCEL_THRESHOLD_G * crate::config::G
+    }
+}
+
+pub(crate) fn transform_sensor_axes(raw: Vec3) -> Vec3 {
+    Vec3 {
+        x: -raw.x,
+        y: -raw.z,
+        z: -raw.y,
     }
 }
