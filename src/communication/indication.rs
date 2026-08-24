@@ -1,5 +1,5 @@
 use crate::config::board::{IndicatorsConfig, NUM_LEDS, Neopixel};
-use crate::state::FlightState;
+use crate::state::{FlightState, GroundSubState};
 use crate::{FLIGHT_STATE, Irqs, Subsystem, mark_init_complete, mark_init_failed};
 use defmt::*;
 use defmt_rtt as _;
@@ -64,7 +64,7 @@ pub async fn indicator_loop(
 
     // Every 20Hz, check the state and proceed with the according buzzer pattern.
     let mut ticker = Ticker::every(Duration::from_hz(20));
-    let mut current_state = state_receiver.get().await;
+    let mut current_state = state_receiver.try_get().unwrap_or(FlightState::PreLaunch(GroundSubState::Startup));
     let mut entered_at = Instant::now();
     loop {
         ticker.next().await;

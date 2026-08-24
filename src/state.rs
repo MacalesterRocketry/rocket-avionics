@@ -141,6 +141,7 @@ impl FlightState {
 
 impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
     pub fn new(sensors: Sensors<I2C>) -> Result<Self, ()> {
+        FLIGHT_STATE.sender().send(FlightState::PreLaunch(GroundSubState::Startup));
         let state = match FLIGHT_STATE.receiver() {
             Some(receiver) => receiver,
             None => {
@@ -185,7 +186,13 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
         self.ahrs.update(gyro, accel, mag, now);
         AHRS_STATE.sender().send(self.ahrs);
 
-        match self.state.get().await {
+        let state = self.state.try_get();
+        if state.is_none() {
+            error!("Flight state not set; defaulting to PreLaunch(Startup)");
+            self.transition_to(FlightState::PreLaunch(GroundSubState::Startup));
+        }
+
+        match state.unwrap_or(FlightState::PreLaunch(GroundSubState::Startup)) {
             // Everything that occurs on the ground prior to launch.
             FlightState::PreLaunch(sub) => {
                 CONTROL_SETPOINT.sender().send(ControlSetpoint::Disarmed);
@@ -199,14 +206,18 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
                     if sensor_data.has_launched() {
                         self.transition_to(FlightState::Ascent(AscentSubState::Burn));
                     }
+                    let has_fix = match self.gps.try_get() {
+                        Some(gps) => gps.has_fix,
+                        None => false,
+                    };
                     match gps_state {
                         ReadyToLaunchSubState::WaitingForGPS => {
-                            if self.gps.get().await.has_fix {
+                            if has_fix {
                                 self.transition_to(FlightState::PreLaunch(GroundSubState::ReadyToLaunch(ReadyToLaunchSubState::GPSLock)));
                             }
                         },
                         ReadyToLaunchSubState::GPSLock => {
-                            if !self.gps.get().await.has_fix {
+                            if !has_fix {
                                 self.transition_to(FlightState::PreLaunch(GroundSubState::ReadyToLaunch(ReadyToLaunchSubState::WaitingForGPS)));
                             }
                         }

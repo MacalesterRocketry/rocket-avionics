@@ -51,7 +51,7 @@ pub async fn sd_logging_loop(sd_config: SdConfig) {
         if gps_receiver.is_some() {
             match gps_receiver.as_mut() {
                 Some(receiver) => {
-                    let gps_state = receiver.get().await;
+                    let gps_state = receiver.try_get();
                     // TODO: log GPS state to SD card
                 }
                 None => {
