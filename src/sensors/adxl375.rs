@@ -1,6 +1,15 @@
 //! ADXL375 ±200 g accelerometer (I²C). Wraps the `adxl3xx` driver crate.
 //!
 //! Scale factor: 49 mg/LSB on ADXL375 (per datasheet table 1).
+//!
+//! TODO: `init_defaults` leaves this at the datasheet default 800 Hz ODR while
+//!   the loop reads it at ~400 Hz, so content above 200 Hz aliases down into the
+//!   band at the read and cannot be filtered out afterward. The ADXL375's
+//!   internal anti-alias filter is tied to the ODR (roughly ODR/4), so pick the
+//!   ODR deliberately against the read rate instead of taking the default —
+//!   same reasoning as the gyro TODO in `lsm6dsox.rs`. Launch detection only
+//!   needs a magnitude spike so it is tolerant, but `merged_accel` feeds AHRS
+//!   once the low-G accel saturates, and that path is not.
 
 use adxl3xx::{Adxl375 as Adxl3xxDriver, AdxlBusI2c};
 use embedded_hal::i2c::I2c as I2cBus;

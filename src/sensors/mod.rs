@@ -36,6 +36,16 @@ pub fn init_all<I2C: embedded_hal::i2c::I2c>(i2c: I2C) -> Result<Sensors<I2C>, I
 impl<I2C: embedded_hal::i2c::I2c> Sensors<I2C> {
     /// Read all four sensors. Returns biased + axis-corrected readings.
     /// TODO: lsm/lis3/bmp still return defaults until their drivers land.
+    /// TODO: Nothing here checks that a reading is actually *new*. If the loop
+    ///   ever outruns a sensor's output data rate — or a sensor's ODR gets
+    ///   lowered, which the aliasing TODOs in the driver modules argue for — the
+    ///   same sample gets returned twice and AHRS integrates it as if time had
+    ///   passed, which corrupts orientation and doubly so velocity/position.
+    ///   The sensors all expose a data-ready bit (LSM6DSOX `STATUS_REG`, LIS3MDL
+    ///   `STATUS_REG`, BMP390 `STATUS`), and their INT pins are already wired
+    ///   through `InterruptConfig`, so the fix is to gate each read on
+    ///   fresh-data and report staleness rather than silently duplicating.
+    ///   Sensors run at different rates, so this is per-sensor, not per-tick.
     pub async fn read_all(&mut self) -> SensorReadings {
         let adxl = self.adxl.read().unwrap_or_else(|_| {
             defmt::warn!("ADXL375 read failed; using zeroed high-G reading for this tick");

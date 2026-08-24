@@ -14,8 +14,8 @@
 
 use crate::config::board::{SYS_CLK_HZ, ServoConfig, Servos};
 use crate::config::{
-    SERVO_DEGREE_RANGE, SERVO_MAX_ANGLE, SERVO_MICROS_MAX, SERVO_MICROS_MIN, SERVO_MIN_ANGLE,
-    SERVO_TRIM,
+    SERVO_DEGREE_RANGE, SERVO_INVERT, SERVO_MAX_ANGLE, SERVO_MICROS_MAX, SERVO_MICROS_MIN,
+    SERVO_MIN_ANGLE, SERVO_TRIM,
 };
 use crate::utils::math::{Deg, clamp};
 use embassy_rp::pwm;
@@ -55,13 +55,18 @@ const MICROS_PER_DEG: f64 = (SERVO_MICROS_MAX - SERVO_MICROS_MIN) as f64 / SERVO
 /// Pulse width at zero deflection and zero trim.
 const MICROS_CENTER: f64 = (SERVO_MICROS_MIN + SERVO_MICROS_MAX) as f64 / 2.0;
 
-/// Convert a deflection angle (deg, signed, 0 = neutral) plus that servo's `trim` into
-/// a pulse width in microseconds.
+/// Convert a deflection angle (deg, signed, 0 = neutral) plus that servo's
+/// `trim` and `invert` into a pulse width in microseconds.
+///
+/// `invert` is applied first, because it describes the command's aerodynamic
+/// sense, while `trim` and the travel limits are mechanical facts in the
+/// servo's own frame.
 ///
 /// Limited both to the servo's mechanical limits (the bounds for the servo's travel)
 /// and the servo's electronic endpoints, so trim removes a bit of range from one end.
-pub const fn angle_to_micros(angle_deg_from_neutral: Deg, trim: Deg) -> u16 {
-    let commanded = clamp(angle_deg_from_neutral, SERVO_MIN_ANGLE, SERVO_MAX_ANGLE);
+pub const fn angle_to_micros(angle_deg_from_neutral: Deg, trim: Deg, invert: bool) -> u16 {
+    let signed = if invert { -angle_deg_from_neutral } else { angle_deg_from_neutral };
+    let commanded = clamp(signed, SERVO_MIN_ANGLE, SERVO_MAX_ANGLE);
     let micros = MICROS_CENTER - (commanded - trim) * MICROS_PER_DEG;
     clamp(micros, SERVO_MICROS_MIN as f64, SERVO_MICROS_MAX as f64) as u16
 }
@@ -74,29 +79,30 @@ fn servo_pwm_config() -> pwm::Config {
     config
 }
 
-/// One servo, carrying the trim that calibrates it.
+/// One servo, carrying the trim and sign that calibrate it.
 ///
 /// The `PwmOutput` is private on purpose: every write goes through
 /// [`set_angle`](ServoOutput::set_angle), so there is no way to command a servo and
-/// forget its trim.
+/// forget its trim or its inversion.
 pub struct ServoOutput {
     output: PwmOutput<'static>,
     trim: Deg,
+    invert: bool,
 }
 
 impl ServoOutput {
     /// Built by the generated `ServoConfig::into_servos`. Not useful elsewhere:
     /// a `PwmOutput` can only be obtained by claiming the servo pins, which
     /// happens exactly once.
-    pub const fn new(output: PwmOutput<'static>, trim: Deg) -> Self {
-        Self { output, trim }
+    pub const fn new(output: PwmOutput<'static>, trim: Deg, invert: bool) -> Self {
+        Self { output, trim, invert }
     }
 
     /// Deflect this servo. 0° is the neutral position; positive and negative
-    /// angles rotate it opposite ways. Trim is always applied.
+    /// angles rotate it opposite ways. Trim and inversion are always applied.
     pub fn set_angle(&mut self, angle_deg_from_neutral: Deg) -> Result<(), pwm::PwmError> {
         self.output.set_duty_cycle_fraction(
-            angle_to_micros(angle_deg_from_neutral, self.trim),
+            angle_to_micros(angle_deg_from_neutral, self.trim, self.invert),
             SERVO_PERIOD_MICROS,
         )
     }
@@ -104,10 +110,8 @@ impl ServoOutput {
 
 /// Claim the servo pins and bring every servo to neutral.
 pub fn init_servos(servo_config: ServoConfig) -> Result<Servos, pwm::PwmError> {
-    let mut servos = servo_config.into_servos(&servo_pwm_config(), SERVO_TRIM);
-    for servo in servos.iter_mut() {
-        servo.set_angle(0.0)?;
-    }
+    let mut servos = servo_config.into_servos(&servo_pwm_config(), SERVO_TRIM, SERVO_INVERT);
+    servos.center_all()?;
     Ok(servos)
 }
 
@@ -118,16 +122,22 @@ mod tests {
 
     const MID: u16 = (SERVO_MICROS_MIN + SERVO_MICROS_MAX) / 2;
 
+    /// Most cases here are about trim and travel, which behave identically
+    /// either way round; inversion gets its own tests at the bottom.
+    const fn uninverted(angle: Deg, trim: Deg) -> u16 {
+        angle_to_micros(angle, trim, false)
+    }
+
     #[test]
     fn untrimmed_center_is_the_pulse_midpoint() {
-        assert_eq!(angle_to_micros(0.0, 0.0), MID);
+        assert_eq!(uninverted(0.0, 0.0), MID);
     }
 
     #[test]
     fn untrimmed_travel_spans_the_full_pulse_range() {
         // Negative deflection lengthens the pulse, positive shortens it.
-        assert_eq!(angle_to_micros(SERVO_MIN_ANGLE, 0.0), SERVO_MICROS_MAX);
-        assert_eq!(angle_to_micros(SERVO_MAX_ANGLE, 0.0), SERVO_MICROS_MIN);
+        assert_eq!(uninverted(SERVO_MIN_ANGLE, 0.0), SERVO_MICROS_MAX);
+        assert_eq!(uninverted(SERVO_MAX_ANGLE, 0.0), SERVO_MICROS_MIN);
     }
 
     /// Regression: the previous normalized-progress formula computed a negative
@@ -136,10 +146,10 @@ mod tests {
     /// degree of authority must actually move the pulse.
     #[test]
     fn every_degree_of_travel_moves_the_pulse() {
-        let mut prev = angle_to_micros(SERVO_MIN_ANGLE, 0.0);
+        let mut prev = uninverted(SERVO_MIN_ANGLE, 0.0);
         let mut deg = SERVO_MIN_ANGLE as i32 + 1;
         while deg <= SERVO_MAX_ANGLE as i32 {
-            let us = angle_to_micros(deg as Deg, 0.0);
+            let us = uninverted(deg as Deg, 0.0);
             assert!(us < prev, "pulse did not move at {deg}°: {prev} -> {us}");
             prev = us;
             deg += 1;
@@ -148,34 +158,48 @@ mod tests {
 
     #[test]
     fn trim_shifts_the_whole_pulse_window() {
-        assert_eq!(angle_to_micros(0.0, -3.0), MID - 30);
-        assert_eq!(angle_to_micros(0.0, 2.5), MID + 25);
+        assert_eq!(uninverted(0.0, -3.0), MID - 30);
+        assert_eq!(uninverted(0.0, 2.5), MID + 25);
         // A trim is just an offset on the command, not a change of scale.
-        assert_eq!(angle_to_micros(10.0, -3.0), angle_to_micros(13.0, 0.0));
+        assert_eq!(uninverted(10.0, -3.0), uninverted(13.0, 0.0));
     }
 
     /// Per the chosen policy, trim never pushes a pulse outside the servo's
     /// endpoints — it costs deflection at one end instead.
     #[test]
     fn trim_clamps_rather_than_exceeding_servo_endpoints() {
-        assert_eq!(angle_to_micros(47.0, -3.0), SERVO_MICROS_MIN);
-        assert_eq!(angle_to_micros(SERVO_MAX_ANGLE, -3.0), SERVO_MICROS_MIN);
+        assert_eq!(uninverted(47.0, -3.0), SERVO_MICROS_MIN);
+        assert_eq!(uninverted(SERVO_MAX_ANGLE, -3.0), SERVO_MICROS_MIN);
         // ...while the opposite end keeps its full travel.
-        assert_eq!(
-            angle_to_micros(SERVO_MIN_ANGLE, -3.0),
-            SERVO_MICROS_MAX - 30
-        );
+        assert_eq!(uninverted(SERVO_MIN_ANGLE, -3.0), SERVO_MICROS_MAX - 30);
     }
 
     #[test]
     fn commands_beyond_mechanical_authority_clamp() {
-        assert_eq!(
-            angle_to_micros(180.0, 0.0),
-            angle_to_micros(SERVO_MAX_ANGLE, 0.0)
-        );
-        assert_eq!(
-            angle_to_micros(-180.0, 0.0),
-            angle_to_micros(SERVO_MIN_ANGLE, 0.0)
-        );
+        assert_eq!(uninverted(180.0, 0.0), uninverted(SERVO_MAX_ANGLE, 0.0));
+        assert_eq!(uninverted(-180.0, 0.0), uninverted(SERVO_MIN_ANGLE, 0.0));
+    }
+
+    #[test]
+    fn inverting_mirrors_the_command_about_neutral() {
+        assert_eq!(angle_to_micros(0.0, 0.0, true), MID);
+        for deg in [1.0, 12.5, SERVO_MAX_ANGLE] {
+            assert_eq!(
+                angle_to_micros(deg, 0.0, true),
+                uninverted(-deg, 0.0),
+                "inverted {deg}° should match uninverted {}°",
+                -deg
+            );
+        }
+    }
+
+    /// Inversion applies to the aerodynamic command, trim to the mechanical
+    /// output, so an inverted servo's trim shifts the pulse the same direction
+    /// as an uninverted one's. Applied in the other order, trim would flip sign
+    /// with inversion and every bench calibration would mean the opposite thing.
+    #[test]
+    fn trim_direction_is_unaffected_by_inversion() {
+        assert_eq!(angle_to_micros(0.0, -3.0, true), MID - 30);
+        assert_eq!(angle_to_micros(0.0, 2.5, true), MID + 25);
     }
 }

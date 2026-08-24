@@ -55,6 +55,41 @@
             )*
         }
 
+        // 3b. Per-fin deflection sign, for a fin whose linkage or mounting
+        //     handedness runs opposite the rest. Same one-per-fin shape as
+        //     `Trims` and for the same reason: it is a fact about a physical
+        //     servo, so it belongs with the wiring, not with the control law.
+        #[derive(Debug, Clone, Copy)]
+        pub struct Inverts {
+            $(
+                pub $a_field: bool,
+                pub $b_field: bool,
+            )*
+        }
+
+        // 3c. Per-fin contribution to each control axis — the airframe geometry
+        //     the mixer needs. Keyed by name rather than positional, because
+        //     iteration order follows slice declaration and differs between
+        //     board revisions: v3 runs xplus/xminus/yplus/yminus while v2 runs
+        //     yminus/xplus/xminus/yplus. A positional table would silently mix
+        //     the wrong way round on one of them.
+        #[derive(Debug, Clone, Copy)]
+        pub struct FinMix {
+            $(
+                pub $a_field: crate::utils::math::AngularVec3,
+                pub $b_field: crate::utils::math::AngularVec3,
+            )*
+        }
+
+        impl FinMix {
+            /// Same order as [`iter_mut`](Servos::iter_mut), because both come
+            /// from one macro expansion — that is what makes zipping the two
+            /// safe without either side naming a fin.
+            pub fn iter(&self) -> impl Iterator<Item = &crate::utils::math::AngularVec3> {
+                [ $( &self.$a_field, &self.$b_field, )* ].into_iter()
+            }
+        }
+
         // 4. Generate the live servo outputs. Each field is an independently
         //    controllable fin — writing one never disturbs its slice-mate,
         //    which `Pwm`'s own `SetDutyCycle` impl cannot promise (it writes
@@ -75,6 +110,7 @@
                 self,
                 config: &embassy_rp::pwm::Config,
                 trims: Trims,
+                inverts: Inverts,
             ) -> $servo_outputs {
                 $(
                     // `new_output_ab` populates both channels, so `split()`
@@ -92,19 +128,31 @@
                 )*
                 $servo_outputs {
                     $(
-                        $a_field: crate::control::servo::ServoOutput::new($a_field, trims.$a_field),
-                        $b_field: crate::control::servo::ServoOutput::new($b_field, trims.$b_field),
+                        $a_field: crate::control::servo::ServoOutput::new(
+                            $a_field, trims.$a_field, inverts.$a_field,
+                        ),
+                        $b_field: crate::control::servo::ServoOutput::new(
+                            $b_field, trims.$b_field, inverts.$b_field,
+                        ),
                     )*
                 }
             }
         }
 
         impl $servo_outputs {
-            /// Every fin, in declaration order. For sweeps and for commands
-            /// that apply to all fins at once; individual fins are just named
-            /// fields.
+            /// Every servo, in declaration order. For sweeps and for commands that
+            /// apply to all servos at once; individual servos are just named fields.
             pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut crate::control::servo::ServoOutput> {
                 [ $( &mut self.$a_field, &mut self.$b_field, )* ].into_iter()
+            }
+
+            /// Bring every servo to neutral. Used at init and whenever control is
+            /// disarmed, so a disarm can never leave a fin deflected.
+            pub fn center_all(&mut self) -> Result<(), embassy_rp::pwm::PwmError> {
+                for servo in self.iter_mut() {
+                    servo.set_angle(0.0)?;
+                }
+                Ok(())
             }
         }
 

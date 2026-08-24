@@ -10,14 +10,13 @@
 use crate::communication::indication::{BeepCycle, BeepSequence, LedColor, StateIndicator};
 use crate::config::HAS_DROGUE_CHUTE;
 use crate::config::board::{I2cConfig, IndicatorsConfig, NUM_LEDS, Neopixel, PeripheralConfig};
-use crate::control::pid::RollPid;
 use crate::navigation::ahrs;
-use crate::navigation::ahrs::AhrsState;
+use crate::navigation::ahrs::{AHRS_STATE, AhrsState};
 use crate::navigation::gps::{GPS_STATE, GpsState};
 use crate::sensors::SensorReadings;
 use crate::sensors::Sensors;
 use crate::utils::errors::handle_unrecoverable_error;
-use crate::utils::math::Deg;
+use crate::utils::math::{Deg, Quat, roll_deg_to_quat};
 use crate::{FLIGHT_STATE, Irqs, Subsystem, is_critical_failure, is_init_all_complete, is_init_critical_complete, mark_init_complete, mark_init_failed, sensors};
 use defmt::{Debug2Format, error, info};
 use embassy_rp::gpio::{Input, Output};
@@ -27,19 +26,38 @@ use embassy_rp::pio_programs::ws2812;
 use embassy_rp::pio_programs::ws2812::{Grb, PioWs2812, PioWs2812Program, RgbColorOrder};
 use embassy_rp::{i2c, pio};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::watch::Receiver;
+use embassy_sync::watch::{Receiver, Watch};
 use embassy_time::{Duration, Instant, Ticker, Timer};
 use smart_leds::RGB8;
 use smart_leds::hsv::{Hsv, hsv2rgb};
 use uom::si::reciprocal_length::reciprocal_centimeter;
 
+/// What the control loop should be doing. The state machine owns the mission
+/// timeline, so it decides the attitude to hold; the control loop only knows how
+/// to get there. Publishing an absolute attitude rather than a roll offset keeps
+/// the ignition-time reference on this side and generalizes to 3-axis unchanged.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ControlSetpoint {
+    /// Fins centered, PID held in reset.
+    Disarmed,
+    /// Drive the airframe to this absolute attitude.
+    Attitude(Quat),
+}
+
+/// Latest control setpoint. A `Watch` because the control loop wants whatever is
+/// current when its own ticker fires — a queue would let setpoints pile up and
+/// be actuated late.
+pub static CONTROL_SETPOINT: Watch<CriticalSectionRawMutex, ControlSetpoint, 2> = Watch::new();
+
 pub struct SystemState<'a, I2C: embedded_hal::i2c::I2c> {
     pub state: Receiver<'a, CriticalSectionRawMutex, FlightState, 2>,
     pub ahrs: AhrsState,
     pub gps: Receiver<'a, CriticalSectionRawMutex, GpsState, 3>,
-    pub roll_pid: RollPid,
     pub sensors: Sensors<I2C>,
     pub(crate) ignition_time: Option<Instant>,
+    /// Orientation captured at ignition. Every roll command is relative to it,
+    /// so it is the reference the published attitude setpoint is built from.
+    pub(crate) launch_orientation: Quat,
     pub(crate) last_tick: Instant,
     // pub last_event: Option<EventType>, // who knows, these last two are just ideas about what might be interesting to have
     // pub error_flags: ErrorFlags,
@@ -141,9 +159,9 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
             state,
             ahrs: AhrsState::default(),
             gps,
-            roll_pid: RollPid::new(),
             sensors,
             ignition_time: None,
+            launch_orientation: Quat::IDENTITY,
             last_tick: Instant::now(),
         })
     }
@@ -165,10 +183,13 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
         let mag = sensor_data.lis3.mag;
 
         self.ahrs.update(gyro, accel, mag, now);
+        AHRS_STATE.sender().send(self.ahrs);
 
         match self.state.get().await {
             // Everything that occurs on the ground prior to launch.
-            FlightState::PreLaunch(sub) => match sub {
+            FlightState::PreLaunch(sub) => {
+                CONTROL_SETPOINT.sender().send(ControlSetpoint::Disarmed);
+                match sub {
                 GroundSubState::Startup => {
                     if is_init_all_complete() { // TODO: AHRS should probably signal if it's ready too
                         self.transition_to(FlightState::PreLaunch(GroundSubState::ReadyToLaunch(ReadyToLaunchSubState::WaitingForGPS)));
@@ -191,18 +212,20 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
                         }
                     }
                 }
-            },
+            }},
 
             FlightState::Ascent(sub) => {
                 if self.ignition_time.is_none() { // shouldn't ever happen because of our transition function, but just in case
                     self.ignition_time = Some(now);
                 }
                 let time_since_ignition = now - self.ignition_time.unwrap_or(now);
-                let desired_angular_acceleration = self.roll_pid.step(roll_program(time_since_ignition), self.ahrs, tick_time);
-                // TODO: send this somehow to fins.rs
+                CONTROL_SETPOINT.sender().send(ControlSetpoint::Attitude(
+                    attitude_target(self.launch_orientation, roll_program(time_since_ignition)),
+                ));
                 match sub {
                     AscentSubState::Burn => {
-                        // TODO: test; if acceleration is negative in z and it's already off the rail (velocity is somewhat high), switch to Coast
+                        // TODO: test;
+                        // if acceleration is negative in z and it's already off the rail (velocity is somewhat high), switch to Coast
                         if self.ahrs.acceleration_earth.z < -0.01 && self.ahrs.velocity_earth.z > 20.0 {
                             self.transition_to(FlightState::Ascent(AscentSubState::Coast));
                         }
@@ -221,6 +244,7 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
             }
 
             FlightState::Recovery(sub) => {
+                CONTROL_SETPOINT.sender().send(ControlSetpoint::Disarmed);
                 match sub {
                     RecoverySubState::DrogueDeploy => {}
                     RecoverySubState::MainDeploy => {}
@@ -235,7 +259,10 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
         info!("transitioning to state {:?}", next_state);
         if next_state == FlightState::Ascent(AscentSubState::Burn) {
             self.ahrs.launch();
-            self.roll_pid.launch(self.ahrs);
+            // Captured here rather than in the control loop so the reference is
+            // the attitude at the instant of ignition, not up to one control
+            // period later.
+            self.launch_orientation = self.ahrs.get_orientation_earth();
             self.ignition_time = Some(Instant::now());
         }
         if next_state == FlightState::Recovery(RecoverySubState::Landed) {
@@ -246,9 +273,26 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
     }
 }
 
+/// Absolute attitude to hold: the orientation captured at ignition, rolled by
+/// the commanded angle. This is the guidance half of the control problem, and it
+/// lives here because the mission timeline does.
+fn attitude_target(launch_orientation: Quat, target_roll: Deg) -> Quat {
+    // TODO: The old was x: sin(angle/2), but the new one has x: sin(angle). Should the Vec3 passed into axisAngleToQuat be {0.5, 0, 0}? Check this all with Tala.
+    let qroll = roll_deg_to_quat(-target_roll); // Negative for body frame
+    // TODO: This probably has different pitch and yaw than what we actually want.
+    //  Replace them with the current ones from qcurrent? Or just ignore them
+    //  since we're only controlling roll?
+    (launch_orientation * qroll).normalized()
+}
+
 /// Pre-programmed roll command: returns target roll angle (deg) as a function
 /// of time since ignition. Currently just a stub matching `rollProgram()` in
 /// states.cpp.
+///
+/// NOTE: this angle is in the same convention as `calculate_roll_deg`, which
+/// flight data showed to be earth-frame — it tracked integrated gyro closely
+/// through most of the flight but diverged sharply once the rocket tilted at
+/// apogee.
 pub fn roll_program(time_since_ignition: Duration) -> Deg {
     let time_s = time_since_ignition.as_micros() as f64 * 1e-6;
     if (0.0..3.0).contains(&time_s) {

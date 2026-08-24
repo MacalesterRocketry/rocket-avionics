@@ -20,7 +20,7 @@ use crate::config::board::{
     SdConfig,
 };
 use crate::config::board::{NUM_LEDS, ServoConfig};
-use crate::control::fins::fins_loop;
+use crate::control::control_loop;
 use crate::navigation::gps::gps_loop;
 use communication::indication::indicator_loop;
 use core::sync::atomic::{AtomicU8, Ordering};
@@ -131,6 +131,16 @@ pub fn is_runtime_critical_failure() -> bool {
 pub fn is_critical_failure() -> bool {
     is_init_critical_failed() || is_runtime_critical_failure()
 }
+pub fn mark_runtime_error(subsystem: Subsystem) {
+    error!("subsystem {} failed at runtime", subsystem);
+    RUNTIME_FAILURES.fetch_or(subsystem.bits(), Ordering::Release);
+}
+pub fn clear_runtime_error(subsystem: Subsystem) {
+    RUNTIME_FAILURES.fetch_and(!subsystem.bits(), Ordering::Release);
+}
+pub fn has_runtime_error(subsystem: Subsystem) -> bool {
+    RUNTIME_FAILURES.load(Ordering::Acquire) != 0
+}
 // TODO: continue implementing error handling stuff
 
 #[embassy_executor::main]
@@ -187,7 +197,7 @@ async fn core0_main(
 
     embassy_futures::join::join(
         system_loop(i2c_config, peripheral_config),
-        fins_loop(servos_config),
+        control_loop(servos_config),
     ).await;
 }
 

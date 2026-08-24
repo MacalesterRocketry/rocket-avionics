@@ -225,6 +225,36 @@ impl SubAssign for Vec3 {
     }
 }
 
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+pub struct AngularVec3 {
+    pub pitch: f64,
+    pub yaw: f64,
+    pub roll: f64,
+}
+
+impl AngularVec3 {
+    pub const ZERO: AngularVec3 = AngularVec3 { pitch: 0.0, yaw: 0.0, roll: 0.0 };
+
+    #[inline]
+    pub const fn new(pitch: f64, yaw: f64, roll: f64) -> Self {
+        Self { pitch, yaw, roll }
+    }
+}
+
+impl From<Vec3> for AngularVec3 {
+    #[inline]
+    fn from(v: Vec3) -> Self {
+        Self { pitch: v.x, yaw: v.y, roll: v.z } // by the right hand rule, so e.g. roll rotates around the z-axis
+    }
+}
+
+impl Into<Vec3> for AngularVec3 {
+    #[inline]
+    fn into(self) -> Vec3 {
+        Vec3::new(self.pitch, self.yaw, self.roll)
+    }
+}
+
 // ────────────────────────────────── Quat ────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Quat {

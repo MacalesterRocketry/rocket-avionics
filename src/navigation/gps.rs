@@ -29,7 +29,6 @@ use ublox::{FixedBuffer, GnssFixType, Parser, ParserError, UbxPacket, UbxPacketM
 use ublox::nav_pvt::common::NavPvtFlags;
 
 pub static GPS_STATE: Watch<CriticalSectionRawMutex, GpsState, 3> = Watch::new();
-// TODO: or maybe use mutex? idk
 
 #[derive(Clone, Copy, Debug, Format)]
 pub struct GpsState {

@@ -1,14 +1,20 @@
 // TODO: These are all pure functions, so this is all unit testable without even needing to run on the board.
 //  Figure out a way to do that.
 
-use crate::config::{AHRS_ACC_BETA, AHRS_MAG_BETA, G};
+use crate::config::{AHRS_ACC_BETA, AHRS_MAG_BETA, G, GYRO_LPF_HZ};
 use crate::utils::math::{Grad4, Quat, Vec3, axis_angle_rad_to_quat, duration_to_seconds};
+use core::f64::consts::PI;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant};
 use libm::sqrt;
 
-// TODO: use mutex or maybe Watch
-/// Mutable AHRS runtime state. Lives behind an Embassy mutex; the sensor task
-/// owns the write side and the control loop reads via getter functions.
+/// Latest AHRS solution, published once per sensor sample.
+pub static AHRS_STATE: Watch<CriticalSectionRawMutex, AhrsState, 2> = Watch::new();
+
+/// Mutable AHRS runtime state. Owned by the sensor task, which calls
+/// [`update`](AhrsState::update) each sample and publishes the result to
+/// [`AHRS_STATE`] for the control loop to read.
 #[derive(Debug, Clone, Copy)]
 pub struct AhrsState {
     pub q: Quat,
@@ -17,6 +23,9 @@ pub struct AhrsState {
     pub velocity_earth: Vec3, // TODO: Might not be a bad idea to make earth-frame and body-frame separate types with into() between them
     pub position_earth: Vec3,
     pub angular_velocity_body: Vec3,
+    /// [`angular_velocity_body`](Self::angular_velocity_body) low-passed at
+    /// [`GYRO_LPF_HZ`]. Use this for control; the raw field is for logging.
+    pub angular_velocity_filtered: Vec3,
     in_flight: bool,
 }
 
@@ -29,6 +38,7 @@ impl Default for AhrsState {
             velocity_earth: Vec3::ZERO,
             position_earth: Vec3::ZERO,
             angular_velocity_body: Vec3::ZERO,
+            angular_velocity_filtered: Vec3::ZERO,
             in_flight: false,
         }
     }
@@ -77,6 +87,14 @@ impl AhrsState {
         self.position_earth += self.velocity_earth * dt_seconds;
 
         self.angular_velocity_body = gyro; // still in body frame, but we can use it for control
+
+        // Anti-alias the gyro for the 50 Hz control loop, which cannot undo
+        // this after the fact — see GYRO_LPF_HZ. Alpha is derived from the
+        // measured dt rather than hardcoded so loop jitter doesn't drag the
+        // cutoff around with it.
+        let tau = 1.0 / (2.0 * PI * GYRO_LPF_HZ);
+        let alpha = dt_seconds / (dt_seconds + tau);
+        self.angular_velocity_filtered += (gyro - self.angular_velocity_filtered) * alpha;
 
         // // TODO: figure out debug stuff for Rust
         // // CONTINUOUS ORIENTATION MONITORING/Active Tracking
@@ -135,6 +153,8 @@ impl AhrsState {
     pub const fn get_velocity_earth(&self) -> Vec3 { self.velocity_earth }
     pub const fn get_position_earth(&self) -> Vec3 { self.position_earth }
     pub const fn get_angular_velocity_body(&self) -> Vec3 { self.angular_velocity_body }
+    /// Low-passed body rates. This is the one control should use — see [`GYRO_LPF_HZ`].
+    pub const fn get_angular_velocity_filtered(&self) -> Vec3 { self.angular_velocity_filtered }
 }
 
 // build delta quaternion(propagation) from angular rate omega (rad/s) and dt

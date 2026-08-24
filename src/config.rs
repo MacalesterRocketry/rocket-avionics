@@ -6,6 +6,8 @@
 
 #![allow(dead_code)]
 
+use crate::utils::math::AngularVec3;
+
 // ─────────────────────────────── debug knobs ────────────────────────────────
 // In the C++ these are `#define X 0/1` preprocessor flags. Here they're plain
 // `const bool` — the optimizer constant-folds them just like the preprocessor,
@@ -63,6 +65,18 @@ pub const AHRS_ACC_BETA: f64 = 0.1;
 /// Madgwick β for magnetometer correction. 0.0 disables it (current default).
 pub const AHRS_MAG_BETA: f64 = 0.0;
 
+/// Cutoff frequency (Hz) of the gyro low-pass that feeds the PID's D term.
+///
+/// This is an anti-aliasing filter. The control loop samples AHRS at
+/// [`control::servo::SERVO_PWM_HZ`] (50 Hz), whose Nyquist frequency is
+/// 25 Hz, so gyroscope responses above 25 Hz become indistinguishable from
+/// the lower-frequency information we actually care about. 190 Hz noise,
+/// for instance, lands at |190 − 4·50| = 10 Hz.
+/// 
+/// This needs to be below 25 Hz or it won't actually filter out the noise,
+/// and faster is better to reduce latency and therefore lag.
+pub const GYRO_LPF_HZ: f64 = 20.0;
+
 // ────────────────────────────── PID constants ───────────────────────────────
 /// Roll-axis moment of inertia (kg·m²).
 pub const MOMENT_OF_INERTIA: f64 = 0.006_85;
@@ -85,7 +99,7 @@ pub const SERVO_MIN_ANGLE: f64 = -50.0;
 pub const SERVO_MICROS_MIN: u16 = 1000;
 pub const SERVO_MICROS_MAX: u16 = 2000;
 
-/// Per-fin mechanical zero offset in degrees.
+/// Per-servo mechanical zero offset in degrees.
 /// Shifts the whole window, so one end of the range ends up with a few degrees cut off.
 pub const SERVO_TRIM: board::Trims = board::Trims {
     xplus: -3.0,
@@ -93,9 +107,34 @@ pub const SERVO_TRIM: board::Trims = board::Trims {
     yplus: -3.0,
     yminus: -3.0,
 };
+
+/// Inverts the direction of servos for if they're mounted backwards
+pub const SERVO_INVERT: board::Inverts = board::Inverts {
+    xplus: false,
+    xminus: false,
+    yplus: false,
+    yminus: false,
+};
 /// Datasheet stall torque at 7.4 V (N·m).
 pub const SERVO_MAX_TORQUE: f64 = 0.51;
 
+/// Each fin's contribution to each control axis, from -1 to 1.
+///
+/// Pitch authority is proportional to cos(theta) where theta is the angle
+/// relative to some shared axis, while yaw is proportional to sin(theta).
+/// For example, for three fins, one has a yaw authority factor of 1.0 and pitch
+/// of 0.0, while the other two have -1/2 for yaw and ±sqrt(3)/2 for pitch.
+/// 
+/// Basically, just put your fins as points on a unit circle. The distance
+/// from the y axis to each fin is the yaw factor, while the distance from
+/// the x axis is the pitch factor. Roll is always 1 unless you're doing
+/// something really weird.
+pub const FIN_MIX: board::FinMix = board::FinMix {
+    xplus: AngularVec3 { pitch: 0.0, yaw: 0.0, roll: 1.0 },
+    xminus: AngularVec3 { pitch: 0.0, yaw: 0.0, roll: 1.0 },
+    yplus: AngularVec3 { pitch: 0.0, yaw: 0.0, roll: 1.0 },
+    yminus: AngularVec3 { pitch: 0.0, yaw: 0.0, roll: 1.0 },
+};
 /// LSM6DSOX low-G accel saturates at 16 g; switch to ADXL375 above this.
 pub const ACCELEROMETER_SWITCH_THRESHOLD: f64 = 15.9 * G;
 
