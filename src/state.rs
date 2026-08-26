@@ -55,12 +55,8 @@ pub struct SystemState<'a, I2C: embedded_hal::i2c::I2c> {
     pub gps: Receiver<'a, CriticalSectionRawMutex, GpsState, 3>,
     pub sensors: Sensors<I2C>,
     pub(crate) ignition_time: Option<Instant>,
-    /// Orientation captured at ignition. Every roll command is relative to it,
-    /// so it is the reference the published attitude setpoint is built from.
     pub(crate) launch_orientation: Quat,
     pub(crate) last_tick: Instant,
-    // pub last_event: Option<EventType>, // who knows, these last two are just ideas about what might be interesting to have
-    // pub error_flags: ErrorFlags,
 }
 #[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
 pub enum FlightState {

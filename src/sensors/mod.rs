@@ -65,6 +65,12 @@ pub struct LsmReading {
     pub temperature: f64,
 }
 
+impl LsmReading {
+    pub fn has_accel_saturated(&self) -> bool {
+        self.accel.mag() >= crate::config::ACCELEROMETER_SWITCH_THRESHOLD
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Lis3Reading {
     /// Body-frame magnetic field (µT), hard-iron corrected.
@@ -97,11 +103,11 @@ impl SensorReadings {
     /// it's saturated, in which case fall back to the high-G accelerometer.
     /// Mirrors the switch in `states.cpp`'s `STATE_ASCENT` handler.
     pub fn merged_accel(&self) -> Vec3 {
-        let lowg = self.lsm.accel;
-        if lowg.mag() >= crate::config::ACCELEROMETER_SWITCH_THRESHOLD {
+        // TODO: Should probably detect if the low-G is offline and swap in the high-G
+        if self.lsm.has_accel_saturated() {
             self.adxl.accel
         } else {
-            lowg
+            self.lsm.accel
         }
     }
 

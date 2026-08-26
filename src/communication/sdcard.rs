@@ -46,7 +46,7 @@ pub async fn sd_logging_loop(sd_config: SdConfig) {
 
     mark_init_complete(Subsystem::SD_CARD);
     let mut ticker: Ticker = Ticker::every(Duration::from_hz(20));
-    loop { // TODO: Use a Channel to receive packets then serialize and writeeee
+    loop { // TODO: Use a Channel to receive packets then serialize and write
         ticker.next().await;
         if gps_receiver.is_some() {
             match gps_receiver.as_mut() {

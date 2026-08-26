@@ -79,16 +79,14 @@ heapless = { version = "0.9", features = ["defmt"] }
 # ─── Sensor driver crates (all TODO — picked but not yet integrated) ─────────
 # These compile cleanly as deps but are not yet wired in. See PORTING_PLAN.md
 # for the per-sensor strategy and the “write a thin driver if no crate fits” notes.
-lsm6dsox  = { version = "2.1", optional = true }   # gyro + low-G accel
-lis3mdl   = { version = "0.1", optional = true }   # magnetometer TODO: fork and improve the driver, it's not great
-bmp390-rs = { version = "0.4", optional = true }   # barometer and temperature sensor
-adxl3xx   = "0.1"
+# TODO: Consider adding a KX134 for an accelerometer with 64G range and better precision than the ADXL375. Maybe have all three?
+lsm6dsox  = "2.1" # gyro + low-G accel
+mmc5983_rs = "0.0.1" # magnetometer
+bmp390-rs = "0.4" # barometer and temperature sensor
+adxl3xx   = "0.1" # high-G accelerometer (ADXL375)
 
 [features]
-default = ["sensors", "hw-v3"]
-# Group the optional sensor driver crates behind one feature so `cargo check`
-# without the full set still passes during early porting.
-sensors = ["dep:lsm6dsox", "dep:lis3mdl", "dep:bmp390-rs"]
+default = ["hw-v3"]
 # Hardware-revision flag mirroring the C++ HARDWARE_VERSION macro. The current
 # flight hardware is rev 2 (custom FeatherWing); rev 3 is the new RP2350 PCB.
 hw-v2 = []

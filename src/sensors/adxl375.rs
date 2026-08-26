@@ -45,6 +45,7 @@ impl<I2C: I2cBus> Adxl<I2C> {
         driver.init_defaults().map_err(|_| Error::Init)?;
         // TODO: figure out if we want to auto calibrate on launchpad somehow
         // driver.calibrate_axis_offsets().map_err(|_| Error::Calibration)?;
+        // TODO: set up DATA_READY interrupt
 
         Ok(Self { driver })
     }
@@ -54,6 +55,7 @@ impl<I2C: I2cBus> Adxl<I2C> {
         let raw: Vec3 = self.driver.read_axis().map_err(|_| Error::Read)?.into();
         // The sensor is mounted in a different orientation than we want, so we need to transform the axes.
         let transformed = transform_sensor_axes(raw);
+        // TODO: return None if it hasn't yet updated (DATA_READY register)
         Ok(AdxlReading {
             accel: Vec3::new(
                 transformed.x - HIGHG_BIAS_X,

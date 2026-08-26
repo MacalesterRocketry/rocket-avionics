@@ -543,7 +543,7 @@ pub fn axis_angle_rad_to_quat(axis: AngularVec3, angle: Rad) -> Quat {
 // TODO: These are all based on the wrong-ish sensor orientation. We should fix this all and transform
 //  it in the sensor reads instead.
 // TODO: Oddly enough, they might have actually been right? Assuming roll is around the Z axis,
-//  this was all right, except that roll was negative.
+//  this was all right, except that roll was negative. Should test.
 #[inline]
 pub fn calculate_roll_rad(q: Quat) -> Rad {
     atan2(2.0 * (q.w * q.z + q.x * q.y),

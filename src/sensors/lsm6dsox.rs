@@ -24,3 +24,24 @@
 //! documented in ST's datasheet and we only need a handful of writes.
 //! TODO: Rotate the result to the correct orientation, since it sits in an orientation
 //!  where -y is what we want Z to be.
+use accelerometer::Accelerometer;
+use defmt::*;
+use embassy_embedded_hal::shared_bus::I2cDeviceError;
+use embassy_time::Delay;
+use embedded_hal::i2c::I2c;
+use lsm6dsox::*;
+
+fn init_lsm6dsox<I2C: I2c>(i2c: I2C) -> Result<(), Error<I2C::Error>> {
+    // TODO: Figure out what address I actually need to use
+    let mut lsm = Lsm6dsox::new(i2c, SlaveAddress::Low, Delay);
+
+    lsm.setup()?;
+    lsm.set_accel_sample_rate(DataRate::Freq416Hz)?; // TODO: tune based on loop speed
+    lsm.set_accel_scale(AccelerometerScale::Accel16g)?;
+    lsm.enable_interrupts(true)?;
+    lsm.map_interrupt(InterruptSource::EmbeddedFunctions, InterruptLine::INT1, true)?;
+    if let Ok(reading) = lsm.accel_norm() {
+        info!("Acceleration: {:?}", Debug2Format(&reading));
+    }
+    Ok(())
+}
