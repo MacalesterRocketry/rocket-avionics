@@ -18,7 +18,7 @@ use crate::sensors::Sensors;
 use crate::utils::errors::handle_unrecoverable_error;
 use crate::utils::math::{Deg, Quat, roll_deg_to_quat};
 use crate::{FLIGHT_STATE, Irqs, Subsystem, is_critical_failure, is_init_all_complete, is_init_critical_complete, mark_init_complete, mark_init_failed, sensors};
-use defmt::{Debug2Format, error, info};
+use defmt::{error, info, Debug2Format};
 use embassy_rp::gpio::{Input, Output};
 use embassy_rp::peripherals::PIO0;
 use embassy_rp::pio::Pio;
@@ -28,6 +28,7 @@ use embassy_rp::{i2c, pio};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::{Receiver, Watch};
 use embassy_time::{Duration, Instant, Ticker, Timer};
+use serde::{Deserialize, Serialize};
 use smart_leds::RGB8;
 use smart_leds::hsv::{Hsv, hsv2rgb};
 use uom::si::reciprocal_length::reciprocal_centimeter;
@@ -36,7 +37,7 @@ use uom::si::reciprocal_length::reciprocal_centimeter;
 /// timeline, so it decides the attitude to hold; the control loop only knows how
 /// to get there. Publishing an absolute attitude rather than a roll offset keeps
 /// the ignition-time reference on this side and generalizes to 3-axis unchanged.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub enum ControlSetpoint {
     /// Fins centered, PID held in reset.
     Disarmed,
@@ -58,32 +59,32 @@ pub struct SystemState<'a, I2C: embedded_hal::i2c::I2c> {
     pub(crate) launch_orientation: Quat,
     pub(crate) last_tick: Instant,
 }
-#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub enum FlightState {
     PreLaunch(GroundSubState),
     Ascent(AscentSubState),
     Recovery(RecoverySubState),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub enum GroundSubState {
     Startup,
     ReadyToLaunch(ReadyToLaunchSubState),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub enum ReadyToLaunchSubState {
     WaitingForGPS,
     GPSLock,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub enum AscentSubState {
     Burn,
     Coast,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub enum RecoverySubState {
     DrogueDeploy,
     MainDeploy,

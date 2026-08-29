@@ -8,10 +8,10 @@
 #![allow(clippy::many_single_char_names)]
 
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
-use embassy_time::Duration;
 // libm provides no_std math intrinsics. On host (cargo test) we still use libm
 // for bit-identical behavior with the firmware build.
 use libm::{asin, atan2, cos, sin, sqrt};
+use serde::{Deserialize, Serialize};
 
 pub type Rad = f64;
 pub type Deg = f64;
@@ -38,7 +38,7 @@ pub const fn clamp(x: f64, lo: f64, hi: f64) -> f64 {
 }
 
 // ────────────────────────────────── Vec3 ────────────────────────────────────
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub struct Vec3 {
     pub x: f64,
     pub y: f64,
@@ -225,7 +225,7 @@ impl SubAssign for Vec3 {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub struct AngularVec3 {
     pub pitch: f64,
     pub yaw: f64,
@@ -349,7 +349,7 @@ impl SubAssign for AngularVec3 {
 }
 
 // ────────────────────────────────── Quat ────────────────────────────────────
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub struct Quat {
     pub w: f64,
     pub x: f64,
@@ -479,7 +479,7 @@ impl From<Grad4> for Quat {
 /// Distinct type from `Quat` so we never accidentally feed a gradient into a
 /// Hamilton product. Scalar ops are intentionally limited to what the
 /// correction step actually needs.
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub struct Grad4 {
     pub w: f64,
     pub x: f64,
@@ -596,10 +596,6 @@ pub fn yaw_deg_to_quat(yaw: Deg) -> Quat {
 #[inline]
 pub fn roll_deg_to_quat(roll: Deg) -> Quat {
     roll_rad_to_quat(deg_to_rad(roll))
-}
-
-pub const fn duration_to_seconds(dt: Duration) -> f64 {
-    dt.as_nanos() as f64 * 1e-9 // convert to seconds
 }
 
 #[cfg(test)]

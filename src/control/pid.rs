@@ -9,7 +9,8 @@
 
 use crate::config::{ROLL_PID_KD, ROLL_PID_KI, ROLL_PID_KP};
 use crate::navigation::ahrs::AhrsState;
-use crate::utils::math::{AngularVec3, Quat, duration_to_seconds};
+use crate::utils::duration_to_seconds;
+use crate::utils::math::{AngularVec3, Quat};
 use embassy_time::{Duration, Instant};
 
 /// Sanity bounds on the timestep, guarding the integral against a garbage `dt`

@@ -140,6 +140,9 @@
         }
 
         impl $servo_outputs {
+            /// Number of servos in this struct.
+            pub const COUNT: usize = [$( stringify!($a_field), stringify!($b_field), )*].len();
+
             /// Every servo, in declaration order. For sweeps and for commands that
             /// apply to all servos at once; individual servos are just named fields.
             pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut crate::control::servo::ServoOutput> {

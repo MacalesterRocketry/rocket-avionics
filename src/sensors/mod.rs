@@ -14,6 +14,7 @@ pub mod bmp390;
 pub mod lis3mdl;
 pub mod lsm6dsox;
 
+use serde::{Deserialize, Serialize};
 use crate::utils::math::{AngularVec3, Vec3};
 
 /// Owns every sensor driver instance sharing the I²C bus.
@@ -55,7 +56,7 @@ impl<I2C: embedded_hal::i2c::I2c> Sensors<I2C> {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub struct LsmReading {
     /// Body-frame linear acceleration (m/s²), bias-subtracted.
     pub accel: Vec3,
@@ -71,26 +72,26 @@ impl LsmReading {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub struct Lis3Reading {
     /// Body-frame magnetic field (µT), hard-iron corrected.
     pub mag: Vec3,
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub struct AdxlReading {
     /// Body-frame high-G acceleration (m/s²), bias-subtracted.
     pub accel: Vec3,
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub struct BmpReading {
     pub pressure: f64,    // Pa
     pub temperature: f64, // °C
     pub altitude: f64,    // m
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub struct SensorReadings {
     pub lsm: LsmReading,
     pub lis3: Lis3Reading,

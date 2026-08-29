@@ -13,50 +13,97 @@
 
 #![allow(dead_code, unused_variables)]
 
+use crc::Crc;
 use crate::communication::log_packets::PacketType;
 use crate::config::board::SdConfig;
-use crate::{FLIGHT_STATE, Subsystem, mark_init_complete, mark_init_failed};
-use defmt::error;
+use crate::{mark_init_complete, mark_init_failed, mark_runtime_error, Subsystem, FLIGHT_STATE};
+use defmt::{error, Format};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Ticker};
+use postcard::ser_flavors::{Cobs, Slice};
+use postcard::ser_flavors::crc::CrcModifier;
+use serde::{Deserialize, Serialize};
+use crate::navigation::gps::GPS_STATE;
 
-/// Enum of every payload variant that can be pushed onto the SD log channel.
-/// Defined as a single sum type so the channel has a fixed element size
-/// (heapless::spsc requires `Copy + 'static`).
-///
-/// TODO: this enum needs a fixed-size variant for each `Payload*` struct in
-/// `log_packets`. We'll size the channel to ~256 entries (≈12 KiB RAM) which
-/// gives plenty of headroom even at burnout when the AHRS fires bursts.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Format)]
 pub enum LogEntry {
-    // populated in the porting step
-    Placeholder,
+    GPS(crate::navigation::gps::GpsState),
+    State(crate::state::FlightState),
+    Sensors(crate::sensors::SensorReadings),
+    AHRS(crate::navigation::ahrs::AhrsState),
+    Control(crate::state::ControlSetpoint),
+    // TODO: Add some way to note PID, fin, and servo outputs (desired angular acceleration, desired deflection angle, and actual deflection angle).
 }
 
-pub fn log_packet(_pkt: PacketType, _entry: LogEntry, _micros: u64) {
-    // TODO: enqueue onto static SD channel.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Format)]
+pub struct LogPacket {
+    pub timestamp_us: u64,
+    pub entry: LogEntry,
 }
 
-pub async fn sd_logging_loop(sd_config: SdConfig) {
-    let mut gps_receiver = FLIGHT_STATE.receiver();
-    if gps_receiver.is_none() {
-        error!("Failed to get GPS receiver; have too many receivers been initialized?");
-        mark_init_failed(Subsystem::GPS);
-        // We can actually continue, we just don't log GPS
+pub async fn log_packet(entry: LogEntry) {
+    let packet = LogPacket {
+        timestamp_us: embassy_time::Instant::now().as_micros(),
+        entry,
     };
+    SD_LOGGING_CHANNEL.sender().send(packet).await
+    // TODO: This blocks until the SD loop can write it.
+    //  Figure out if we want that. I'm guessing not (dropping packets is better than blocking the hot loop), but we need to figure out how to handle that.
+}
+
+pub static SD_LOGGING_CHANNEL: Channel<CriticalSectionRawMutex, LogPacket, 256> = Channel::new();
+
+const CRC: Crc<u32> = Crc::<u32>::new(&crc::CRC_32_ISCSI);
+pub async fn sd_logging_loop(sd_config: SdConfig) {
+    let sd_receiver = SD_LOGGING_CHANNEL.receiver();
+
+    const WRITE_BUFFER_SIZE: usize = 512;
+    let mut write_buffer = [0u8; WRITE_BUFFER_SIZE];
+    let mut buffer_index = 0;
 
     mark_init_complete(Subsystem::SD_CARD);
-    let mut ticker: Ticker = Ticker::every(Duration::from_hz(20));
-    loop { // TODO: Use a Channel to receive packets then serialize and write
-        ticker.next().await;
-        if gps_receiver.is_some() {
-            match gps_receiver.as_mut() {
-                Some(receiver) => {
-                    let gps_state = receiver.try_get();
-                    // TODO: log GPS state to SD card
+    loop {
+        let packet = sd_receiver.receive().await;
+
+        // TODO: figure out what the length of the serialized maximum packet is. Can that be programmatic?
+        let buf = &mut [0u8; 128];
+        // let test = postcard::to_slice_cobs(&packet, buf);
+        let ser_result = postcard::serialize_with_flavor::<LogPacket, _, _>(
+            &packet,
+            CrcModifier::new(
+                Cobs::try_new(
+                    Slice::new(buf)
+                ).unwrap(), // TODO: fix unwrap()
+                CRC.digest(),
+            )
+        );
+
+        match ser_result {
+            Ok(serialized_packet) => {
+                let mut packet_remaining_bytes = serialized_packet;
+
+                while !packet_remaining_bytes.is_empty() {
+                    let buffer_space_left = WRITE_BUFFER_SIZE - buffer_index;
+                    let chunk_size = packet_remaining_bytes.len().min(buffer_space_left); // how much can be written before either the buffer is full or the packet is finished
+
+                    write_buffer[buffer_index..buffer_index + chunk_size]
+                        .copy_from_slice(&packet_remaining_bytes[..chunk_size]);
+
+                    buffer_index += chunk_size;
+                    packet_remaining_bytes = &mut packet_remaining_bytes[chunk_size..]; // chop off the part that's been written to the buffer
+
+                    // If buffer is full, flush it and reset so we can log the rest of the packet
+                    if buffer_index >= WRITE_BUFFER_SIZE { // should never be >, but might as well be safe
+                        // TODO: async sd_card.write_block(&write_buffer).await;
+                        buffer_index = 0;
+                    }
                 }
-                None => {
-                    error!("Failed to get GPS receiver");
-                }
+            }
+            Err(_e) => {
+                error!("Failed to serialize packet");
+                mark_runtime_error(Subsystem::SD_CARD);
+                // TODO: Should probably add some packet saying there was an error (though who knows if it can be logged)
             }
         }
     }

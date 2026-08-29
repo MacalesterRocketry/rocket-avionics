@@ -71,7 +71,9 @@ embedded-sdmmc = { version = "0.10", default-features = false, features = ["defm
 # serde is used for serializing packets to/from SD card.
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 # postcard is a serde serializer for a compact binary format, which we use for SD card storage.
-postcard = { version = "1.1", features = ["defmt"] }
+postcard = { version = "1.1", features = ["use-defmt", "use-crc"] }
+# crc is used by postcard for CRC32 checksums on SD card packets.
+crc = "3.4.0"
 
 # Lock-free fixed-size queue for sensor→SD packet handoff between cores.
 heapless = { version = "0.9", features = ["defmt"] }

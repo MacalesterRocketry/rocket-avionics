@@ -139,7 +139,7 @@ pub fn clear_runtime_error(subsystem: Subsystem) {
     RUNTIME_FAILURES.fetch_and(!subsystem.bits(), Ordering::Release);
 }
 pub fn has_runtime_error(subsystem: Subsystem) -> bool {
-    RUNTIME_FAILURES.load(Ordering::Acquire) != 0
+    Subsystem::from_bits_truncate(RUNTIME_FAILURES.load(Ordering::Acquire)).contains(subsystem)
 }
 // TODO: continue implementing error handling stuff
 

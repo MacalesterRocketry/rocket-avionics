@@ -1,13 +1,16 @@
 // TODO: These are all pure functions, so this is all unit testable without even needing to run on the board.
 //  Figure out a way to do that.
 
+use crate::utils::{serialize_instant, deserialize_instant};
 use crate::config::{AHRS_ACC_BETA, AHRS_MAG_BETA, G, GYRO_LPF_HZ};
-use crate::utils::math::{axis_angle_rad_to_quat, duration_to_seconds, AngularVec3, Grad4, Quat, Vec3};
+use crate::utils::duration_to_seconds;
+use crate::utils::math::{AngularVec3, Grad4, Quat, Vec3, axis_angle_rad_to_quat};
 use core::f64::consts::PI;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant};
 use libm::sqrt;
+use serde::{Deserialize, Serialize};
 
 /// Latest AHRS solution, published once per sensor sample.
 pub static AHRS_STATE: Watch<CriticalSectionRawMutex, AhrsState, 2> = Watch::new();
@@ -15,9 +18,12 @@ pub static AHRS_STATE: Watch<CriticalSectionRawMutex, AhrsState, 2> = Watch::new
 /// Mutable AHRS runtime state. Owned by the sensor task, which calls
 /// [`update`](AhrsState::update) each sample and publishes the result to
 /// [`AHRS_STATE`] for the control loop to read.
-#[derive(Debug, Clone, Copy)]
+// #[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, defmt::Format)]
 pub struct AhrsState {
     pub q: Quat,
+    #[serde(serialize_with = "serialize_instant")]
+    #[serde(deserialize_with = "deserialize_instant")]
     pub last_update: Instant,
     pub acceleration_earth: Vec3,
     pub velocity_earth: Vec3, // TODO: Might not be a bad idea to make earth-frame and body-frame separate types with into() between them
