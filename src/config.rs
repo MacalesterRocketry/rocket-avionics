@@ -177,6 +177,7 @@ pub mod board {
             bus: UART1,
         },
         sd: SdConfig {
+            spi: SPI0,
             sclk: PIN_34,
             mosi: PIN_35,
             miso: PIN_36,

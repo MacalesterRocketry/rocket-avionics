@@ -29,3 +29,10 @@ pub fn deserialize_instant<'de, D: serde::Deserializer<'de>>(deserializer: D) ->
     let micros: u64 = u64::deserialize(deserializer)?;
     Ok(Instant::from_micros(micros))
 }
+
+pub fn unwrap_infallible<T>(result: Result<T, core::convert::Infallible>) -> T {
+    match result {
+        Ok(v) => v,
+        Err(e) => match e {},
+    }
+}
