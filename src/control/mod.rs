@@ -24,9 +24,47 @@ use crate::control::pid::RollPid;
 use crate::control::servo::init_servos;
 use crate::navigation::ahrs::AHRS_STATE;
 use crate::state::{CONTROL_SETPOINT, ControlSetpoint};
-use crate::{mark_init_complete, mark_init_failed, mark_runtime_error, Subsystem, has_runtime_error, clear_runtime_error};
-use defmt::{Debug2Format, error, info, warn};
+use crate::utils::errors::{Subsystem, SubsystemError, clear_runtime_error, mark_init_complete, report_init_error, report_runtime_error};
+use defmt::{Debug2Format, Format, info};
+use embassy_rp::pwm;
 use embassy_time::{Duration, Ticker};
+
+/// Everything that can go wrong in the attitude control subsystem.
+///
+/// `pwm::PwmError` is embassy's and only derives `Debug`, so [`Format`] is
+/// hand-written here to route it through `Debug2Format`.
+#[derive(Debug)]
+pub enum ControlError {
+    /// The servo PWM slices could not be configured at startup.
+    ServoInit(pwm::PwmError),
+    /// Writing a deflection command to a servo failed.
+    ServoWrite(pwm::PwmError),
+    /// Too many `AHRS_STATE` receivers are in use, so another can't be created.
+    NoAhrsReceiver,
+    /// Too many `CONTROL_SETPOINT` receivers are in use, so another can't be created.
+    NoSetpointReceiver,
+}
+
+impl Format for ControlError {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            Self::ServoInit(e) => defmt::write!(f, "servo init failed: {:?}", Debug2Format(e)),
+            Self::ServoWrite(e) => defmt::write!(f, "servo write failed: {:?}", Debug2Format(e)),
+            Self::NoAhrsReceiver => {
+                defmt::write!(f, "no AHRS receiver available; too many initialized?")
+            }
+            Self::NoSetpointReceiver => {
+                defmt::write!(f, "no control setpoint receiver available; too many initialized?")
+            }
+        }
+    }
+}
+
+impl SubsystemError for ControlError {
+    fn subsystem(&self) -> Subsystem {
+        Subsystem::CONTROL
+    }
+}
 
 pub async fn control_loop(servo_config: ServoConfig) {
     info!("initializing servos");
@@ -37,20 +75,17 @@ pub async fn control_loop(servo_config: ServoConfig) {
             servos
         }
         Err(e) => {
-            error!("Error initializing servos: {:?}", Debug2Format(&e));
-            mark_init_failed(Subsystem::CONTROL);
+            report_init_error(ControlError::ServoInit(e));
             return;
         }
     };
 
     let Some(mut ahrs_rx) = AHRS_STATE.receiver() else {
-        error!("Failed to get AHRS receiver; have too many receivers been initialized?");
-        mark_init_failed(Subsystem::CONTROL);
+        report_init_error(ControlError::NoAhrsReceiver);
         return;
     };
     let Some(mut setpoint_rx) = CONTROL_SETPOINT.receiver() else {
-        error!("Failed to get control setpoint receiver; have too many receivers been initialized?");
-        mark_init_failed(Subsystem::CONTROL);
+        report_init_error(ControlError::NoSetpointReceiver);
         return;
     };
 
@@ -93,12 +128,11 @@ pub async fn control_loop(servo_config: ServoConfig) {
             }
             None => servos.center_all(),
         };
-        if let Err(e) = result {
-            warn!("servo write failed: {:?}", Debug2Format(&e));
-            mark_runtime_error(Subsystem::CONTROL);
-        } else if has_runtime_error(Subsystem::CONTROL) {
-            info!("servo write succeeded, clearing runtime error");
-            clear_runtime_error(Subsystem::CONTROL);
+        match result {
+            Err(e) => report_runtime_error(ControlError::ServoWrite(e)),
+            // `clear_runtime_error` only logs if the bit was actually set, so
+            // this is cheap to call on every successful frame.
+            Ok(()) => clear_runtime_error(Subsystem::CONTROL),
         }
     }
 }

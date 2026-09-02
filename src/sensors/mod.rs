@@ -23,12 +23,12 @@ pub struct Sensors<I2C: embedded_hal::i2c::I2c> {
     pub adxl: adxl375::Adxl<I2C>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, defmt::Format)]
 pub enum InitError {
     Adxl(adxl375::Error),
 }
 
-/// Bring up every sensor on the shared I²C bus. Mirrors `initSensors()`.
+/// Bring up every sensor on the shared I²C bus
 pub fn init_all<I2C: embedded_hal::i2c::I2c>(i2c: I2C) -> Result<Sensors<I2C>, InitError> {
     let adxl = adxl375::Adxl::init(i2c).map_err(InitError::Adxl)?;
     Ok(Sensors { adxl })

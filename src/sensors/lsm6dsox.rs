@@ -26,7 +26,6 @@
 //!  where -y is what we want Z to be.
 use accelerometer::Accelerometer;
 use defmt::*;
-use embassy_embedded_hal::shared_bus::I2cDeviceError;
 use embassy_time::Delay;
 use embedded_hal::i2c::I2c;
 use lsm6dsox::*;

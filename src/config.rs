@@ -144,10 +144,9 @@ pub const BATTERY_VOLTAGE_R2: f64 = 100_000.0;
 
 #[cfg(feature = "hw-v3")]
 pub mod board {
-    use embassy_rp::Peri;
+    use crate::define_hardware;
     use embassy_rp::peripherals::*;
     use embassy_rp::pio_programs::ws2812::PioWs2812;
-    use crate::define_hardware;
 
     /// External high-speed crystal on the Metro RP2350 board is 12 MHz, as with most RP2350 boards
     pub(crate) const XTAL_FREQ_HZ: u32 = 12_000_000u32;

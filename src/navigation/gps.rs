@@ -7,28 +7,26 @@
 
 #![allow(dead_code, unused_variables)]
 
-use crate::utils::{serialize_instant_opt, deserialize_instant_opt};
-use core::ops::BitAnd;
 use crate::config::board::GpsConfig;
-use crate::{Irqs, Subsystem, mark_init_complete, mark_init_failed};
+use crate::utils::{deserialize_instant_opt, serialize_instant_opt};
+use crate::utils::errors::{Subsystem, mark_init_complete};
+use crate::Irqs;
 use chrono::prelude::*;
-use core::sync::atomic::{AtomicU32, Ordering};
 use defmt::{Format, info};
-use embassy_executor::Spawner;
 use embassy_rp::uart;
-use embassy_rp::uart::{Async, BufferedUart, Uart, UartRx, UartTx};
+use embassy_rp::uart::BufferedUart;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Watch;
-use embassy_time::{Duration, Instant, Ticker, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use embedded_io_async::{Read, Write};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use ublox::cfg_msg::{CfgMsgAllPorts, CfgMsgAllPortsBuilder, CfgMsgSinglePortBuilder};
+use serde::{Deserialize, Serialize};
+use ublox::cfg_msg::CfgMsgSinglePortBuilder;
 use ublox::cfg_prt::{CfgPrtUartBuilder, UartMode, UartPortId};
 use ublox::cfg_rate::{AlignmentToReferenceTime, CfgRateBuilder};
-use ublox::nav_pvt::proto33::{NavPvt, NavPvtRef};
-use ublox::{FixedBuffer, GnssFixType, Parser, ParserError, UbxPacket, UbxPacketMeta, UbxPacketRequest, UbxParserIter};
 use ublox::nav_pvt::common::NavPvtFlags;
+use ublox::nav_pvt::proto33::{NavPvt, NavPvtRef};
 use ublox::packetref_proto33::PacketRef;
+use ublox::{FixedBuffer, Parser, UbxPacket, UbxParserIter};
 
 pub static GPS_STATE: Watch<CriticalSectionRawMutex, GpsState, 3> = Watch::new();
 
@@ -92,6 +90,7 @@ impl GpsState {
                     self.process_valid_packet(p);
                 },
                 Some(Err(e)) => {
+                    // TODO: add error handling here
                     info!("Received malformed packet: {}", defmt::Debug2Format(&e));
                 },
                 None => {
@@ -134,6 +133,7 @@ pub async fn gps_loop(gps_config: GpsConfig) {
                 state.process_packets(&mut it);
             },
             Err(e) => {
+                // TODO: add error handling here
                 info!("Error reading from serial port: {}", defmt::Debug2Format(&e));
                 break;
             },

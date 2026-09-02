@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize, Serializer};
 pub(crate) mod errors;
 pub mod math;
 mod hardware_macro;
+pub(crate) mod panic_handler;
 
 pub const fn duration_to_seconds(dt: Duration) -> f64 {
     dt.as_nanos() as f64 * 1e-9 // convert to seconds

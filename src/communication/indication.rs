@@ -1,6 +1,7 @@
 use crate::config::board::{IndicatorsConfig, NUM_LEDS, Neopixel};
 use crate::state::{FlightState, GroundSubState};
-use crate::{FLIGHT_STATE, Irqs, Subsystem, mark_init_complete, mark_init_failed};
+use crate::utils::errors::{Subsystem, SubsystemError, mark_init_complete, report_init_error};
+use crate::{FLIGHT_STATE, Irqs};
 use defmt::*;
 use defmt_rtt as _;
 use embassy_rp::gpio::Output;
@@ -11,6 +12,22 @@ use embassy_sync::watch::Receiver;
 use embassy_time::{Duration, Instant, Ticker};
 use smart_leds::RGB8;
 use smart_leds::hsv::{Hsv, hsv2rgb};
+
+/// Everything that can go wrong initializing the indicators.
+///
+/// The buzzer and NeoPixel are infallible to construct, so the only failure
+/// mode is the flight-state watch running out of receiver slots.
+#[derive(Debug, defmt::Format)]
+pub enum IndicationError {
+    /// Too many `FLIGHT_STATE` receivers are in use, so another can't be created.
+    NoFlightStateReceiver,
+}
+
+impl SubsystemError for IndicationError {
+    fn subsystem(&self) -> Subsystem {
+        Subsystem::INDICATORS
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
 pub enum LedColor {
@@ -55,8 +72,8 @@ pub async fn indicator_loop(
             mark_init_complete(Subsystem::INDICATORS);
             return_val
         },
-        Err(_) => {
-            mark_init_failed(Subsystem::INDICATORS);
+        Err(e) => {
+            report_init_error(e);
             return;
         }
     };
@@ -94,7 +111,7 @@ pub async fn indicator_loop(
     }
 }
 
-fn init_indicators(indicators_config: IndicatorsConfig) -> Result<(Output<'static>, Neopixel, Receiver<'static, CriticalSectionRawMutex, FlightState, 2>), ()> {
+fn init_indicators(indicators_config: IndicatorsConfig) -> Result<(Output<'static>, Neopixel, Receiver<'static, CriticalSectionRawMutex, FlightState, 2>), IndicationError> {
     info!("initializing buzzer");
     let mut buzzer = Output::new(indicators_config.buzzer, embassy_rp::gpio::Level::Low);
     buzzer.set_low();
@@ -120,10 +137,7 @@ fn init_indicators(indicators_config: IndicatorsConfig) -> Result<(Output<'stati
             info!("Flight state receiver initialized");
             receiver
         },
-        None => {
-            error!("Failed to get flight state receiver; have too many receivers been initialized?");
-            return Err(());
-        },
+        None => return Err(IndicationError::NoFlightStateReceiver),
     };
     Ok((buzzer, neopixel, receiver))
 }

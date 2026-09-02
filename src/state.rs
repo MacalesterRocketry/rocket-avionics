@@ -7,31 +7,22 @@
 
 #![allow(dead_code, unused_variables)]
 
-use crate::communication::indication::{BeepCycle, BeepSequence, LedColor, StateIndicator};
+use crate::communication::indication::{BeepCycle, LedColor, StateIndicator};
 use crate::config::HAS_DROGUE_CHUTE;
-use crate::config::board::{I2cConfig, IndicatorsConfig, NUM_LEDS, Neopixel, PeripheralConfig};
-use crate::navigation::ahrs;
+use crate::config::board::{I2cConfig, PeripheralConfig};
 use crate::navigation::ahrs::{AHRS_STATE, AhrsState};
 use crate::navigation::gps::{GPS_STATE, GpsState};
-use crate::sensors::SensorReadings;
 use crate::sensors::Sensors;
-use crate::utils::errors::handle_unrecoverable_error;
+use crate::utils::errors::{Subsystem, SubsystemError, is_init_all_complete, mark_init_complete, report_init_error};
 use crate::utils::math::{Deg, Quat, roll_deg_to_quat};
-use crate::{FLIGHT_STATE, Irqs, Subsystem, is_critical_failure, is_init_all_complete, is_init_critical_complete, mark_init_complete, mark_init_failed, sensors};
-use defmt::{error, info, Debug2Format};
-use embassy_rp::gpio::{Input, Output};
-use embassy_rp::peripherals::PIO0;
-use embassy_rp::pio::Pio;
-use embassy_rp::pio_programs::ws2812;
-use embassy_rp::pio_programs::ws2812::{Grb, PioWs2812, PioWs2812Program, RgbColorOrder};
-use embassy_rp::{i2c, pio};
+use crate::{FLIGHT_STATE, Irqs, sensors};
+use defmt::{error, info};
+use embassy_rp::gpio::Input;
+use embassy_rp::i2c;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::{Receiver, Watch};
-use embassy_time::{Duration, Instant, Ticker, Timer};
+use embassy_time::{Duration, Instant, Ticker};
 use serde::{Deserialize, Serialize};
-use smart_leds::RGB8;
-use smart_leds::hsv::{Hsv, hsv2rgb};
-use uom::si::reciprocal_length::reciprocal_centimeter;
 
 /// What the control loop should be doing. The state machine owns the mission
 /// timeline, so it decides the attitude to hold; the control loop only knows how
@@ -136,22 +127,37 @@ impl FlightState {
     }
 }
 
+/// Everything that can go wrong bringing up the core system state.
+///
+/// Covers both `BASE_SYSTEM` (the state machine and its watch receivers) and
+/// the sensor bring-up it depends on.
+#[derive(Debug, defmt::Format)]
+pub enum StateError {
+    /// A sensor driver failed to initialize.
+    SensorInit(sensors::InitError),
+    /// Too many `FLIGHT_STATE` receivers are in use, so another can't be created.
+    NoFlightStateReceiver,
+    /// Too many `GPS_STATE` receivers are in use, so another can't be created.
+    NoGpsReceiver,
+}
+
+impl SubsystemError for StateError {
+    fn subsystem(&self) -> Subsystem {
+        match self {
+            Self::SensorInit(_) => Subsystem::SENSORS,
+            Self::NoFlightStateReceiver | Self::NoGpsReceiver => Subsystem::BASE_SYSTEM,
+        }
+    }
+}
+
 impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
-    pub fn new(sensors: Sensors<I2C>) -> Result<Self, ()> {
+    pub fn new(sensors: Sensors<I2C>) -> Result<Self, StateError> {
         FLIGHT_STATE.sender().send(FlightState::PreLaunch(GroundSubState::Startup));
-        let state = match FLIGHT_STATE.receiver() {
-            Some(receiver) => receiver,
-            None => {
-                error!("Failed to get flight state receiver; have too many receivers been initialized?");
-                return Err(())
-            }
+        let Some(state) = FLIGHT_STATE.receiver() else {
+            return Err(StateError::NoFlightStateReceiver);
         };
-        let gps = match GPS_STATE.receiver() {
-            Some(receiver) => receiver,
-            None => {
-                error!("Failed to get GPS state receiver; have too many receivers been initialized?");
-                return Err(())
-            }
+        let Some(gps) = GPS_STATE.receiver() else {
+            return Err(StateError::NoGpsReceiver);
         };
         Ok(Self {
             state,
@@ -166,11 +172,6 @@ impl<'a, I2C: embedded_hal::i2c::I2c> SystemState<'a, I2C> {
 
     /// The main loop tick
     pub async fn tick(&mut self) {
-        if is_critical_failure() {
-            error!("Critical failure detected; shutting down");
-            // TODO: close SD card, etc.
-            handle_unrecoverable_error()
-        }
         let now = Instant::now();
         let tick_time = now - self.last_tick;
         self.last_tick = now;
@@ -329,9 +330,9 @@ pub async fn system_loop(i2c_config: I2cConfig, peripheral_config: PeripheralCon
             sensors
         }
         Err(e) => {
-            error!("Error initializing sensors: {:?}", Debug2Format(&e));
-            mark_init_failed(Subsystem::SENSORS);
+            report_init_error(StateError::SensorInit(e));
             defmt::panic!("Failed to initialize sensors");
+            // TODO: What if some sensors are fine but some fail? We can tolerate the loss of a magnetometer, but not a gyroscope.
         }
     };
     info!("sensors initialized");
@@ -342,9 +343,8 @@ pub async fn system_loop(i2c_config: I2cConfig, peripheral_config: PeripheralCon
             mark_init_complete(Subsystem::BASE_SYSTEM);
             system
         }
-        Err(_) => {
-            error!("Failed to initialize system state");
-            mark_init_failed(Subsystem::BASE_SYSTEM);
+        Err(e) => {
+            report_init_error(e);
             defmt::panic!("Failed to initialize system state");
         }
     };

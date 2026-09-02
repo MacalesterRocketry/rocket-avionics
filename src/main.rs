@@ -9,41 +9,26 @@
 
 #![no_std]
 #![no_main]
-#![allow(dead_code, unused_imports)]
 
 extern crate uom;
 
 use crate::communication::sdcard::sd_logging_loop;
-use crate::config::G;
-use crate::config::board::{
-    AvionicsHardware, GpsConfig, I2cConfig, IndicatorsConfig, InterruptConfig, Neopixel, PeripheralConfig,
-    SdConfig,
-};
-use crate::config::board::{NUM_LEDS, ServoConfig};
+use crate::config::board::{GpsConfig, I2cConfig, IndicatorsConfig, InterruptConfig, PeripheralConfig, SdConfig};
+use crate::config::board::ServoConfig;
 use crate::control::control_loop;
 use crate::navigation::gps::gps_loop;
+use crate::state::{FlightState, system_loop};
 use communication::indication::indicator_loop;
-use core::sync::atomic::{AtomicU8, Ordering};
 use defmt::*;
 use defmt_rtt as _;
 use embassy_executor::{Executor, SpawnError, SpawnToken, Spawner};
-use embassy_rp::gpio::{Input, Output};
 use embassy_rp::multicore::{Stack, spawn_core1};
-use embassy_rp::peripherals::{DMA_CH0, DMA_CH1, DMA_CH2, I2C0, PIO0, UART0};
-use embassy_rp::pio::Pio;
-use embassy_rp::pio_programs::ws2812::{Grb, PioWs2812, PioWs2812Program};
-use embassy_rp::{Peri, Peripherals, bind_interrupts, dma, pio, pio_programs};
+use embassy_rp::peripherals::{DMA_CH0, I2C0, PIO0, UART0};
+use embassy_rp::{bind_interrupts, dma, pio};
 use embassy_rp::{i2c, uart};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
-use embassy_time::{Duration, Instant, Ticker, Timer};
-use embedded_hal::digital::OutputPin;
-use embedded_hal_async::i2c::I2c;
-use smart_leds::hsv::{Hsv, hsv2rgb};
-use smart_leds::{RGB8, RGBA};
 use static_cell::StaticCell;
-use crate::state::{system_loop, FlightState};
 
 mod config;
 mod navigation;
@@ -72,76 +57,6 @@ static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
 pub static FLIGHT_STATE: Watch<CriticalSectionRawMutex, FlightState, 2> = Watch::new();
-
-bitflags! {
-    pub struct Subsystem: u8 {
-        const BASE_SYSTEM = 1 << 0; // core 0
-        const SENSORS     = 1 << 1;
-        const CONTROL     = 1 << 2;
-
-        const INDICATORS  = 1 << 5; // core 1
-        const SD_CARD     = 1 << 6;
-        const GPS         = 1 << 7;
-    }
-}
-pub static FLIGHT_CRITICAL_SUBSYSTEMS: &[Subsystem] = &[Subsystem::BASE_SYSTEM, Subsystem::SENSORS];
-pub static INIT_DONE: AtomicU8 = AtomicU8::new(0);
-pub static INIT_FAILED: AtomicU8 = AtomicU8::new(0);
-pub static RUNTIME_FAILURES: AtomicU8 = AtomicU8::new(0);
-
-
-fn check_subsystems_any(subsystems: &[Subsystem], subsystem_flags: &AtomicU8) -> bool {
-    subsystems
-        .iter()
-        .any(|s| {
-            Subsystem::from_bits_truncate(subsystem_flags.load(Ordering::Acquire)).contains(*s)
-        })
-}
-fn check_subsystems_all(subsystems: &[Subsystem], subsystem_flags: &AtomicU8) -> bool {
-    subsystems
-        .iter()
-        .all(|s| {
-            Subsystem::from_bits_truncate(subsystem_flags.load(Ordering::Acquire)).contains(*s)
-        })
-}
-
-pub fn mark_init_complete(subsystem: Subsystem) {
-    info!("subsystem {} initialized", subsystem);
-    INIT_DONE.fetch_or(subsystem.bits(), Ordering::Release);
-}
-pub fn mark_init_failed(subsystem: Subsystem) {
-    error!("subsystem {} failed to initialize", subsystem);
-    INIT_FAILED.fetch_or(subsystem.bits(), Ordering::Release);
-}
-pub fn is_init_all_complete() -> bool {
-    Subsystem::from_bits_truncate(INIT_DONE.load(Ordering::Acquire)) == Subsystem::all()
-}
-pub fn is_init_critical_complete() -> bool {
-    check_subsystems_all(FLIGHT_CRITICAL_SUBSYSTEMS, &INIT_DONE)
-}
-pub fn is_init_any_failed() -> bool {
-    check_subsystems_any(FLIGHT_CRITICAL_SUBSYSTEMS, &INIT_FAILED)
-}
-pub fn is_init_critical_failed() -> bool {
-    check_subsystems_any(FLIGHT_CRITICAL_SUBSYSTEMS, &INIT_FAILED)
-}
-pub fn is_runtime_critical_failure() -> bool {
-    check_subsystems_any(FLIGHT_CRITICAL_SUBSYSTEMS, &RUNTIME_FAILURES)
-}
-pub fn is_critical_failure() -> bool {
-    is_init_critical_failed() || is_runtime_critical_failure()
-}
-pub fn mark_runtime_error(subsystem: Subsystem) {
-    error!("subsystem {} failed at runtime", subsystem);
-    RUNTIME_FAILURES.fetch_or(subsystem.bits(), Ordering::Release);
-}
-pub fn clear_runtime_error(subsystem: Subsystem) {
-    RUNTIME_FAILURES.fetch_and(!subsystem.bits(), Ordering::Release);
-}
-pub fn has_runtime_error(subsystem: Subsystem) -> bool {
-    Subsystem::from_bits_truncate(RUNTIME_FAILURES.load(Ordering::Acquire)).contains(subsystem)
-}
-// TODO: continue implementing error handling stuff
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! {

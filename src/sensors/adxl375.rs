@@ -18,7 +18,7 @@ use crate::config::{HIGHG_BIAS_X, HIGHG_BIAS_Y, HIGHG_BIAS_Z};
 use crate::sensors::{transform_sensor_axes, AdxlReading};
 use crate::utils::math::Vec3;
 
-#[derive(Debug)]
+#[derive(Debug, defmt::Format)]
 pub enum Error {
     /// Device ID mismatch or register I/O failure during setup.
     Init,

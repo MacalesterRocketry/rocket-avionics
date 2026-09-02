@@ -15,34 +15,60 @@
 
 use core::fmt::Write;
 use crate::config::board::SdConfig;
-use crate::navigation::gps::GPS_STATE;
-use crate::{FLIGHT_STATE, Subsystem, mark_init_complete, mark_init_failed, mark_runtime_error};
+use crate::utils::errors::{Subsystem, mark_init_complete};
 use chrono::DateTime;
-use core::cell::RefCell;
-use core::convert::Infallible;
-use core::fmt::write;
 use core::ops::ControlFlow;
 use crc::Crc;
-use defmt::{Format, error};
-use embassy_embedded_hal::shared_bus::blocking::spi::SpiDevice;
+use defmt::Format;
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::SPI0;
 use embassy_rp::spi;
 use embassy_rp::spi::{Blocking, Spi};
-use embassy_sync::blocking_mutex::Mutex;
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use embassy_time::{Delay, Duration, Instant, Ticker, Timer};
+use embassy_time::{Delay, Instant};
 use embedded_hal_bus::spi::ExclusiveDevice;
-use embedded_sdmmc::Mode::{ReadWriteCreate, ReadWriteCreateOrTruncate};
-use embedded_sdmmc::filesystem::ToShortFileName;
-use embedded_sdmmc::sdcard::spi::Error;
-use embedded_sdmmc::{Directory, File, SdCard, TimeSource, Timestamp, VolumeManager};
+use embedded_sdmmc::Mode::ReadWriteCreate;
+use embedded_sdmmc::{Directory, File, SdCard, SdCardError, TimeSource, Timestamp, VolumeManager};
 use heapless::String;
 use postcard::ser_flavors::crc::CrcModifier;
 use postcard::ser_flavors::{Cobs, Slice};
 use serde::{Deserialize, Serialize};
+use crate::utils::errors::{SubsystemError, report_init_error, report_runtime_error};
 use crate::utils::unwrap_infallible;
+
+/// Everything that can go wrong in the SD card logging subsystem.
+///
+/// Neither `embedded_sdmmc::Error` nor `postcard::Error` is `Copy`, so neither
+/// is this.
+#[derive(Debug, Clone, Format)]
+pub enum SdError {
+    /// The card or its FAT filesystem reported an error.
+    Fs(embedded_sdmmc::Error<SdCardError>),
+    /// A `LogPacket` could not be serialized into the scratch buffer.
+    Serialize(postcard::Error),
+    /// Every log filename permitted by FAT 8.3 (`LOG0.BIN`..`LOG99999.BIN`) is
+    /// taken, so there is nowhere left to write.
+    LogDirFull,
+}
+
+impl From<embedded_sdmmc::Error<SdCardError>> for SdError {
+    fn from(err: embedded_sdmmc::Error<SdCardError>) -> Self {
+        Self::Fs(err)
+    }
+}
+
+impl From<postcard::Error> for SdError {
+    fn from(err: postcard::Error) -> Self {
+        Self::Serialize(err)
+    }
+}
+
+impl SubsystemError for SdError {
+    fn subsystem(&self) -> Subsystem {
+        Subsystem::SD_CARD
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Format)]
 pub enum LogEntry {
@@ -93,9 +119,8 @@ pub async fn sd_logging_loop(sd_config: SdConfig) {
     let file = match open_log_file(&vol_mgr) {
         Ok(file) => file,
         Err(e) => {
-            error!("Failed to initialize SD card: {}", e);
             // TODO: Do I need to unmount it or something here?
-            mark_init_failed(Subsystem::SD_CARD);
+            report_init_error(e);
             return;
         }
     };
@@ -110,15 +135,14 @@ pub async fn sd_logging_loop(sd_config: SdConfig) {
 
         // TODO: figure out what the length of the serialized maximum packet is. Can that be programmatic?
         let buf = &mut [0u8; 128];
-        let ser_result = postcard::serialize_with_flavor::<LogPacket, _, _>(
-            &packet,
-            CrcModifier::new(
-                Cobs::try_new(
-                    Slice::new(buf)
-                ).unwrap(), // TODO: fix unwrap()
-                CRC.digest(),
+        // `Cobs::try_new` and `serialize_with_flavor` both fail with `postcard::Error`,
+        // so `and_then` folds them into one result rather than panicking on the former.
+        let ser_result = Cobs::try_new(Slice::new(buf)).and_then(|cobs| {
+            postcard::serialize_with_flavor::<LogPacket, _, _>(
+                &packet,
+                CrcModifier::new(cobs, CRC.digest()),
             )
-        );
+        });
 
         // TODO: add ability to close SD card
         match ser_result {
@@ -138,21 +162,16 @@ pub async fn sd_logging_loop(sd_config: SdConfig) {
                     // If buffer is full, flush it and reset so we can log the rest of the packet
                     if buffer_index >= WRITE_BUFFER_SIZE { // should never be >, but might as well be safe
                         // TODO: This doesn't write by blocks, since it's in a file. Figure out what's most efficient.
-                        match file.write(&write_buffer) {
-                            Ok(_) => {},
-                            Err(e) => {
-                                error!("Failed to write block: {}", e);
-                                mark_runtime_error(Subsystem::SD_CARD);
-                            }
-                        };
+                        if let Err(e) = file.write(&write_buffer) {
+                            report_runtime_error(SdError::from(e));
+                        }
                         // TODO: Should we write multiple blocks at once? Would require a small refactor.
                         buffer_index = 0;
                     }
                 }
             }
             Err(e) => {
-                error!("Failed to serialize packet: {}", e);
-                mark_runtime_error(Subsystem::SD_CARD);
+                report_runtime_error(SdError::from(e));
                 // TODO: Should probably add some packet saying there was an error (though who knows if it can be logged)
             }
         }
@@ -162,7 +181,7 @@ pub async fn sd_logging_loop(sd_config: SdConfig) {
 type RocketSdCard<'a> = SdCard<ExclusiveDevice<Spi<'a, SPI0, Blocking>, Output<'a>, Delay>, Delay>;
 type RocketVolumeManager<'a> = VolumeManager<RocketSdCard<'a>, SDTimeSource>;
 type RocketFile<'a, 'd> = File<'a, RocketSdCard<'d>, SDTimeSource, 4, 4, 1>;
-fn open_log_file<'a, 'd>(vol_mgr: &'a RocketVolumeManager<'d>) -> Result<RocketFile<'a, 'd>, embedded_sdmmc::Error<Error>> {
+fn open_log_file<'a, 'd>(vol_mgr: &'a RocketVolumeManager<'d>) -> Result<RocketFile<'a, 'd>, SdError> {
     let vol = vol_mgr.open_volume(embedded_sdmmc::VolumeIdx(0))?;
     let root_dir = vol.open_root_dir()?;
 
@@ -186,7 +205,7 @@ fn init_sd_card<'d>(sd_config: SdConfig) -> RocketSdCard<'d> {
     SdCard::new(spi_device, Delay)
 }
 
-fn choose_filename(root_dir: &Directory<RocketSdCard<'_>, SDTimeSource, 4, 4, 1>) -> Result<String<12>, embedded_sdmmc::Error<Error>> {
+fn choose_filename(root_dir: &Directory<RocketSdCard<'_>, SDTimeSource, 4, 4, 1>) -> Result<String<12>, SdError> {
     let mut highest_file_id: i32 = -1;
 
     root_dir.iterate_dir(|entry| {
@@ -214,6 +233,6 @@ fn choose_filename(root_dir: &Directory<RocketSdCard<'_>, SDTimeSource, 4, 4, 1>
     let next_file_id = (highest_file_id + 1) as u32;
 
     let mut filename: String<12> = String::new();
-    write!(&mut filename, "LOG{}.BIN", next_file_id)?;
+    write!(&mut filename, "LOG{}.BIN", next_file_id).map_err(|_| SdError::LogDirFull)?;
     Ok(filename)
 }
